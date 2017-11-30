@@ -1,6 +1,5 @@
-
-
 require('should')
+
 var hapipath = '../huntercoServices.js',
     aws_config_file_path = './config.development.json'
 var ls;
@@ -47,11 +46,13 @@ function b(done){
 }
 
 function a(done){
-    this.timeout(20000)
-    ls.kill('SIGINT');     
-    ls.on('close',function(){
-        done();
-    })       
+    this.timeout(30000)
+    setTimeout(() => {
+        ls.kill('SIGINT');     
+        ls.on('close',function(){
+            done();
+        })       
+    }, 1000);
 }
 
 
@@ -119,6 +120,7 @@ describe('General',function(){
     })
 
     describe('Test Initialization Errors',function(){
+        
         before(b)
         after(a)
         it('Test random app identifier',function(done){
@@ -176,28 +178,29 @@ describe('General',function(){
     describe.only('Send message and receive message',function(){
         before(b)
         after(a)
-        var app1,app2;
+       
+        var app1,
+            app2;
 
-        it('Initialize first app',function(){
+        it('Initialize first app',function(done){
             var config = require('./hapi.test.peoplesearch.worker.json');
-            config.app = 'app1'
-            config.worker = 'app1'
-            config.log.debug = true
-            app1 = new HAPI(config);
-            return app1.initialize();
-        }).timeout(10000)
-    
-        it('Initialize second app',function(){
-            var config = require('./hapi.test.peoplesearch.worker.json');
-            
             config.app = 'app2'
             config.worker = 'app2'
+            config.log.debug = false
+            config.log.info  = false;
             
-            config.log.debug = true
-            
-            app2 = new HAPI(config)
+            app2 = new HAPI(config);
+            app2.initialize().then(_=>{
+                var config = Object.assign({},require('./hapi.test.peoplesearch.worker.json'));
+                
+                config.app = 'app1'
+                config.worker = 'app1'
+                config.log.debug = false;
+                config.log.info  = false;
 
-            return app2.initialize()
+                app1 = new HAPI(config)
+                app1.initialize().then(_=>done()).catch(done)
+            }).catch(done);
         }).timeout(10000)
         
         var message;
@@ -206,22 +209,32 @@ describe('General',function(){
         it('Send and receive message',function(done){
 
             try{
-                
-                app2.onRequest('getProfile.1',(msg) =>{
-                    msg.repply({
-                        linkedin_profile:'https://www.linkedin.com.br/in/calebebrim'
-                    }).then(_=>app1.readMessages()).catch(done);
+                /// onError: callback to use when processing procedure wasn't executed sucessfully.
+                ///          usage: onError(new Error('Error: Description'))
+                app2.onRequest('getProfile.1',(msg,resolve,onError) =>{
+                    resolve({
+                        linkedin_profile:'processed data of calebebrim'
+                    });
+                    app1.readMessages()
+                        // .then(_=>{});
                 });
                 
                 app1.onResponse('getProfile.1',function(msg){
+                    // console.log('app1: onResponse getProfile.1')
                     app2.removeListeners('getProfile.1');
                     app1.removeListeners('getProfile.1');
+                    msg.should.have.property('data')
+                    msg.data.should.have.property('payload')
+                    msg.data.payload.should.equal('payload');
                     done();
                 })
+                
                 app1.sendRequest("app2","getProfile.1",{
                     linkedin_profile:'https://www.linkedin.com.br/in/calebebrim'
-                },"payload").then(_=>app2.readMessages().then(_=>console.log('app2 messges read'))).catch(done);
-
+                },"payload").then(_=>app2.readMessages()).catch(done);                
+                
+                
+                
                 
             }catch(error){
                 done(error)
@@ -231,25 +244,38 @@ describe('General',function(){
         it('Send to inexistent app',function(done){
             app1.sendRequest("unknown","unknown",{
                 linkedin_profile:'https://www.linkedin.com.br/in/calebebrim' 
-            },"jobid=1").then(_=>done()).catch(done);
+            },"jobid=1").then(_=>done(new Error('Should not execute sucessfully'))).catch(err=>{
+                if(/^ServiceNotFoundError:.*/.test(err.message)) done();
+                else done(new Error('Incorrect Error Message: '+err.message))
+            });
         })
         
         
         it('Test Unknow service',function(done){
+            
+            app1.onResponse('unknown',function(msg,resolve,reject){
+                try{
+                    msg.data.response.should.have.property('error')
+                    msg.data.response.error.message.should.equal('UnknowMethodError: Service does not have required \'unknown\' service.')
+                    done()
+                } catch (err){
+                    done(err)
+                }
+
+            })
+
+
             app1.sendRequest("app2","unknown",{
                 linkedin_profile:'https://www.linkedin.com.br/in/calebebrim'
-            },"jobid=1").then(_=>done()).catch(done);
-        })
+            },"jobid=1").then(_=>{
+                app2.readMessages().then(function(){
+                    app1.readMessages(); 
+                }).catch(done)
+            }).catch(done);
+            
+            
+        }).timeout(60000)
 
-        it('Test Remote Processing Error',function(){
-            app1.onResponse('test',function(message){
-                message.should.have.a.property('data')
-                message.should.have.a.property('payload')
-                message.should.have.a.property('error')
-            })
-        })
-
-    
     })
 
     describe('Three apps working',function(){

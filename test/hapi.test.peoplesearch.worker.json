@@ -13,7 +13,7 @@
             "consume":{
                 "MaxNumberOfMessages":1,
                 "VisibilityTimeout":60000,
-                "WaitTimeSeconds":10
+                "WaitTimeSeconds":1
             }            
         },
         "sns":{

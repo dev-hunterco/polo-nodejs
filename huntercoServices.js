@@ -48,15 +48,17 @@ function initLogger(self){
                     this.color = color;
                     this.active = active;
                     this.log = function(message){
-                        var dt = new Date();
-                        var D = dt.getDate(),
-                            M = dt.getMonth(),
-                            Y = dt.getFullYear(),
-                            h = dt.getHours(),
-                            m = dt.getMinutes(),
-                            s = dt.getSeconds(),
-                            ms = dt.getMilliseconds();
-                        if(this.active) console.log(`[${D}/${M}/${Y} - ${h}:${m}:${s}:${ms}][${this.tag}][${self.configuration.worker}] ${message}`[this.color])
+                        if(this.active){
+                            var dt = new Date();
+                            var D = dt.getDate(),
+                                M = dt.getMonth(),
+                                Y = dt.getFullYear(),
+                                h = dt.getHours(),
+                                m = dt.getMinutes(),
+                                s = dt.getSeconds(),
+                                ms = dt.getMilliseconds();
+                            console.log(`[${D}/${M}/${Y} - ${h}:${m}:${s}:${ms}][${this.tag}][${self.configuration.worker}] ${message}`[this.color])
+                        }
                     }
                 }
             }
@@ -67,17 +69,17 @@ function initLogger(self){
             logger.warn  =  new Logger('warn','orange'    , self.configuration.log && (typeof self.configuration.log.warn  !== 'undefined')? self.configuration.log.warn  :true);
             logger.err   =  new Logger('error','red'      , self.configuration.log && (typeof self.configuration.log.err   !== 'undefined')? self.configuration.log.err   :true);
             logger.err.log = function(error){
-                var dt = new Date();
-                var D = dt.getDate(),
-                    M = dt.getMonth(),
-                    Y = dt.getFullYear(),
-                    h = dt.getHours(),
-                    m = dt.getMinutes(),
-                    s = dt.getSeconds(),
-                    ms = dt.getMilliseconds();
-
-                
-                if(this.active) console.log(`[${D}/${M}/${Y} - ${h}:${m}:${s}:${ms}][${this.tag}][${self.configuration.worker}] ${error.message} ${error.stack}`[this.color])
+                if(this.active){
+                    var dt = new Date();
+                    var D = dt.getDate(),
+                        M = dt.getMonth(),
+                        Y = dt.getFullYear(),
+                        h = dt.getHours(),
+                        m = dt.getMinutes(),
+                        s = dt.getSeconds(),
+                        ms = dt.getMilliseconds();
+                    console.log(`[${D}/${M}/${Y} - ${h}:${m}:${s}:${ms}][${this.tag}][${self.configuration.worker}] ${error.message} ${error.stack}`[this.color])
+                }
                 
             }
             self._logger = logger;
@@ -115,9 +117,10 @@ function configureErrors(self){
         try {
             self._logger.debug.log('Initializing errors')
             self.errors = {};
-            self.errors.AppNotRegistered = function(){ return new Error('AppNotRegistered: App must be registered with an valid identifier.')};
-            self.errors.WrongAppId = function(){ return new Error('WrongAppId: Incorrect number of queues, App identification is not valid for this API.')};
-            self.errors.AppWithoutId = function(){ return new Error('AppWithoutId: App must be registered with an identifier.')};
+            self.errors.AppNotRegistered = _=> new Error('AppNotRegisteredError: App must be registered with an valid identifier.')
+            self.errors.WrongAppId = _=> new Error('WrongAppIdError: Incorrect number of queues, App identification is not valid for this API.')
+            self.errors.AppWithoutId = _=> new Error('AppWithoutIdError: App must be registered with an identifier.')
+            self.errors.ServiceNotFound = _=> new Error('ServiceNotFoundError: Sending Request to an Inexistent app')
             resolve(self)            
         } catch (error) {
             reject(error)
@@ -216,7 +219,7 @@ function updateQueuesUrlsFromServer(self){
             if(err) reject(err);
             else {
                 
-                if(data.QueueUrls && self._logger.debug.active ){
+                if(data.QueueUrls){
                     self.aws.sqs.urls = data.QueueUrls;
                     self._logger.debug.log(`Listing service URLs`)
                     self.aws.sqs.urls.forEach(url => {
@@ -349,12 +352,13 @@ function consumeSQS(self,url) {
     return new Promise(function(resolve,reject){
         self._logger.debug.log('Consume queue: '+url)
         
-        params = Object.assign({QueueUrl:url}, self.aws.sqs.consume);
+        params = Object.assign({QueueUrl:url}, self.configuration.aws.sqs.consume);
         self.aws.sqs.api.receiveMessage(params, function(err, data) {
             if (err) {
                 self._logger.err.log(err);
             } else {
                 if (data.Messages && data.Messages.length > 0) {
+                    self._logger.info.log(`Received ${data.Messages.length} message(s) from queue ${url}.`);
                     Promise.all(data.Messages.map(m => {
                         m.data = JSON.parse(m.Body);
                         if(/_request$/i.test(url)){
@@ -367,7 +371,10 @@ function consumeSQS(self,url) {
                         }
                     })).then(_=>resolve(self)).catch(reject);
                     
-                }else{resolve(self)}
+                }else{
+                    self._logger.debug.log(`No message received from queue ${url}.`);
+                    resolve(self)
+                }
 
             }
         })
@@ -388,7 +395,7 @@ function handleResponse(self,message){
     return new Promise(function(resolve,reject){
         try {
             self._logger.debug.log(`Response => ${message.data.service}`);
-            process.nextTick(_=>self._handler.response[message.data.service](message))
+            self._handler.response[message.data.service](message,resolve,reject)
             resolve(self)
         } catch (error) {
             reject(error)
@@ -398,16 +405,24 @@ function handleResponse(self,message){
 
 function handleRequest(self,message){
     return new Promise(function(resolve,reject){
-        try {
-            message.repply = function(data){
-                return sendResponse(self,this,data);
-            }
-            self._logger.debug.log(`Request => ${message.data.service}`);
-            if(self._handler.request && self._handler.request[message.data.service]) process.nextTick(_=>self._handler.request[message.data.service](message))
-            resolve(self)
-        } catch (error) {
-            reject(error)
+        message.repply = function(data){
+            return sendResponse(self,this,data);
         }
+        message.sendError = function(err){
+            return sendResponse(self,this,{error:{message:err.message}})
+        }
+        self._logger.debug.log(`Request => ${message.data.service}`);
+        new Promise(function(resolve,reject){
+            try {
+                self._handler.request[message.data.service](message,resolve,reject);
+            } catch (error) {
+                if(/.*is not a function$/.test(error.message)) message.sendError(new Error('UnknowMethodError: Service does not have required \'unknown\' service.')).then(resolve).catch(reject);    
+            }
+        }).then(response=>{
+            message.repply(response).then(_=>resolve(self)).catch(reject)
+        }).catch(reject)
+        
+    
         
 
     })
@@ -420,7 +435,7 @@ function removeListeners(event){
 
 function sendResponse(self,message,response){
     return new Promise(function(resolve,reject){
-        self._logger.debug.log('sending response')
+        self._logger.info.log('Sending response to '+message.data.callback)
         var response_service = message.data.callback
         if(!response_service) reject(new Error('Can\'t Respond Message: Provided message does not have response service'))
         var data = {
@@ -434,6 +449,7 @@ function sendResponse(self,message,response){
             QueueUrl: response_service /* required */ ,
             DelaySeconds: 0
         };
+
         self.aws.sqs.api.sendMessage(send_params, function(err, data) {
             if (err) {
                 reject(err)
@@ -451,21 +467,20 @@ function sendRequest(to,service,body,payload){
         updateQueuesUrlsFromServer(self)
             .then(getRegisteredSQSAttibutes)
             .then(function(){
-                try {
-                    
+                try {   
                     var request_service = self.aws.sqs.urls.filter(url=>new RegExp(`${to}_request$`).test(url))[0]
                     var response_service = self.aws.sqs.urls.filter(url=>new RegExp(`${self.configuration.app}_response$`).test(url))[0]
-                    self._logger.debug.log(`to: ${to}, service: ${service}, payload: ${payload}, url:${request_service}`)
-                    if(!request_service) throw new Error('Service not found')
-                    var attrs = []; for( att in self.aws.sqs.queue[request_service]){attrs.push(att)}
-                    self.aws.sqs.queue
+                    if(!request_service) throw self.errors.ServiceNotFound() //new Error('ServiceNotFoundError: Sending Request to an Inexistent app')
+                    self._logger.info.log(`to: ${to}, service: ${service}, payload: ${payload}, url:${request_service}`)
+                    // var attrs = []; for( att in self.aws.sqs.queue[request_service]){attrs.push(att)}
+                    // self.aws.sqs.queue
                     var data = {
                         body:body,
                         service:service,
                         callback:response_service,
                         payload:payload
                     }
-                    if(payload || payload==="" || payload == null) delete data.payload;
+                    if((payload && payload==="") || (payload && payload == null)) delete data.payload;
                     var send_params = {
                         MessageBody: JSON.stringify(data) /* required */ ,
                         QueueUrl: request_service /* required */ ,
