@@ -14,9 +14,6 @@ sqs.listQueues(params, function(err, data) {
     if (err) {
         console.log("Error", err);
     } else {
-        console.log("Success", data.QueueUrls);
+        console.log("Success", data);
     }
 });
-
-require('./producer.js')
-require('./consumer.js')

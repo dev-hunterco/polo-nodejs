@@ -25,8 +25,6 @@ function consume() {
         if (err) {
             done(err);
         } else {
-            // console.log('receiving Messages:')
-            // console.dir(data)
             if (data.Messages && data.Messages.length > 0) {
                 data.Messages.forEach(m => {
                     process.nextTick(processMessage, m)
