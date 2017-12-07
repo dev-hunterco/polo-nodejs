@@ -6,6 +6,18 @@ var ls;
 const HAPI = require(hapipath)
 
 
+function clone(obj) {
+    if (null == obj || "object" != typeof obj) return obj;
+    var copy = obj.constructor();
+    for (var attr in obj) {
+        if (obj.hasOwnProperty(attr)){
+            if (null != obj || "object" == typeof obj) copy[attr] = clone(obj[attr]);
+            else copy[attr] = obj[attr];
+        }
+    }
+    return copy;
+}
+
 function configureAWSLocalStackLChildProcess(){
     return new Promise(function(resolve,reject){
         try {
@@ -14,22 +26,22 @@ function configureAWSLocalStackLChildProcess(){
             ls = spawn('localstack', ['start']);
             
             ls.stdout.on('data', (data) => {
-                console.log(`stdout: ${data}`);
+                // console.log(`stdout: ${data}`);
                 if(/\nReady./ig.test(data)){
                     resolve()
                 }
             });
             
             ls.stderr.on('data', (data) => {
-                console.log(`stderr: ${data}`);
+                // console.log(`stderr: ${data}`);
             });
             
             ls.on('close', (code) => {
-                console.log(`Localstack has being terminated with code: ${code}`);
+                // console.log(`Localstack has being terminated with code: ${code}`);
             });
     
             process.on('beforeExit',function(code){
-                console.log('terminating child processes')
+                // console.log('terminating child processes')
                 ls.exit(code);  
             })            
         } catch (error) {
@@ -55,41 +67,42 @@ function a(done){
     }, 1000);
 }
 
+function initializeHapi(hapi,done){
+    hapi.initialize().then(_=>{
+        try{
+            hapi.aws.sqs.should.have
+                .property('queue')
+                    .which.is.a.Object()
+                    .and.have.property('http://localhost:4576/queue/br_com_hunterco_service_peoplesearch_request')
+                        .which.is.an.Object()
+                        
+            hapi.aws.sqs.should.have
+                .property('queue')
+                    .which.is.a.Object()
+                    .and.have.property('http://localhost:4576/queue/br_com_hunterco_service_peoplesearch_response')
+                        .which.is.an.Object()
+            
+            hapi.aws.sqs.queue['http://localhost:4576/queue/br_com_hunterco_service_peoplesearch_response']
+                .should.have.property('QueueArn')
+                .which.is.an.String()
+                
+            
+            hapi.aws.sqs.queue['http://localhost:4576/queue/br_com_hunterco_service_peoplesearch_response']
+                .should.have.property('QueueArn')
+                .which.is.an.String()
+                
+            done()
+
+        }catch(err){
+            done(err)
+        }
+    
+    }).catch(done);
+}
 
     
 describe('General',function(){  
-    function initializeHapi(hapi,done){
-        hapi.initialize().then(_=>{
-            try{
-                hapi.aws.sqs.should.have
-                    .property('queue')
-                        .which.is.a.Object()
-                        .and.have.property('http://localhost:4576/queue/br_com_hunterco_service_peoplesearch_request')
-                            .which.is.an.Object()
-                            
-                hapi.aws.sqs.should.have
-                    .property('queue')
-                        .which.is.a.Object()
-                        .and.have.property('http://localhost:4576/queue/br_com_hunterco_service_peoplesearch_response')
-                            .which.is.an.Object()
-                
-                hapi.aws.sqs.queue['http://localhost:4576/queue/br_com_hunterco_service_peoplesearch_response']
-                    .should.have.property('QueueArn')
-                    .which.is.an.String()
-                    
-                
-                hapi.aws.sqs.queue['http://localhost:4576/queue/br_com_hunterco_service_peoplesearch_response']
-                    .should.have.property('QueueArn')
-                    .which.is.an.String()
-                    
-                done()
-
-            }catch(err){
-                done(err)
-            }
-        
-        }).catch(done);
-    }
+    
     describe('Configure with json object',function(){
         before(b)
         after(a)
@@ -97,7 +110,8 @@ describe('General',function(){
         it('Initialize with json object',function(done){
             var HAPI = require(hapipath)
             try {
-                hapi = new HAPI(require('./hapi.test.peoplesearch.worker.json'));
+                var config = clone(require('./hapi.test.peoplesearch.worker.json'));
+                hapi = new HAPI(config);
                 initializeHapi(hapi,done)
             } catch (error) {
                 done(error)
@@ -119,13 +133,13 @@ describe('General',function(){
         }).timeout(20000);
     })
 
-    describe('Test Initialization Errors',function(){
+    describe('Initialization Errors',function(){
         
         before(b)
         after(a)
         it('Test random app identifier',function(done){
             var HAPI = require(hapipath)
-            var config = require('./hapi.test.peoplesearch.worker.json');
+            var config = clone(require('./hapi.test.peoplesearch.worker.json'));
             config.app = ""+Math.random();
             config.aws.sqs.create = false
             new HAPI(config).initialize().then(function(){
@@ -133,7 +147,7 @@ describe('General',function(){
             }).catch(err => {
                 try {
                     err.should.be.an.instanceOf(Error)
-                    err.should.have.property('message','AppNotRegistered: App must be registered with an valid identifier.')
+                    err.should.have.property('message','AppNotRegisteredError: App must be registered with an valid identifier.')
                     done() 
                 } catch (error) {
                     done(error)
@@ -148,55 +162,69 @@ describe('General',function(){
         it('Test missing id error',function(done){
             
             var HAPI = require(hapipath)
-            var config = require('./hapi.test.peoplesearch.worker.json');
+            var config = clone(require('./hapi.test.peoplesearch.worker.json'));
             delete config.worker;
             new HAPI(config).initialize().then(_=>{
                 done(new Error('Should not initialize without worker id'))
             }).catch(err=>{
-                err.should.be.an.instanceOf(Error)
-                err.should.have.property('message','AppWithoutId: App must be registered with an identifier.')
-                done() //should start error
+                try{
+                    err.should.be.an.instanceOf(Error)
+                    err.should.have.property('message','AppWithoutIdError: App must be registered with an identifier.')
+                    done() //should start error
+                    
+                }catch(err){
+                    done(err)
+                }
             })
+            
+        }).timeout(10000)
+    })
+
+    describe('Offline Initialization Test',function(){
+        var app1
+        it('Initialize one worker',function(done){
+            var config = clone(require('./hapi.test.peoplesearch.worker.json'));            
+            app1 = new HAPI(config)
+            app1.initialize(_=>{
+                done(new Error("Should end with success"))
+            }).catch(err=>{
+                done()
+            })
+        }).timeout(10000)
+
+        it('send message',function(){
+            app1.sendRequest("app2","getProfile.1",{
+                linkedin_profile:'https://www.linkedin.com.br/in/calebebrim'
+            },"payload").then(_=>done(new Error('should not success'))).catch(err=>done());                
             
         })
     })
 
-    describe('Offline Initialization Test',function(){
-        before(b);
-        after(a);
-        var app1
-        it('Initialize one worker',function(done){
-            app1 = new HAPI(config)
-            app1.initialize(_=>done()).catch(done)
-        }).timeout(10000)
-
-        it('send message',function(){
-            throw new Error('Not implemented');
-        })
-    })
-
-    describe.only('Send message and receive message',function(){
+    describe('Send message and receive message',function(){
         before(b)
         after(a)
        
         var app1,
             app2;
 
-        it('Initialize first app',function(done){
-            var config = require('./hapi.test.peoplesearch.worker.json');
+        it('Initialize apps',function(done){
+
+            var config = clone(require('./hapi.test.peoplesearch.worker.json'));
             config.app = 'app2'
             config.worker = 'app2'
-            config.log.debug = false
+            config.log.debug = false;
             config.log.info  = false;
+            config.aws.sqs.create = true;
             
             app2 = new HAPI(config);
             app2.initialize().then(_=>{
-                var config = Object.assign({},require('./hapi.test.peoplesearch.worker.json'));
+                var config = clone(require('./hapi.test.peoplesearch.worker.json'));
                 
                 config.app = 'app1'
                 config.worker = 'app1'
                 config.log.debug = false;
                 config.log.info  = false;
+                config.aws.sqs.create = true;
 
                 app1 = new HAPI(config)
                 app1.initialize().then(_=>done()).catch(done)
@@ -208,45 +236,45 @@ describe('General',function(){
         
         it('Send and receive message',function(done){
 
-            try{
-                /// onError: callback to use when processing procedure wasn't executed sucessfully.
-                ///          usage: onError(new Error('Error: Description'))
-                app2.onRequest('getProfile.1',(msg,resolve,onError) =>{
-                    resolve({
-                        linkedin_profile:'processed data of calebebrim'
+                try{
+                    /// onError: callback to use when processing procedure wasn't executed sucessfully.
+                    ///          usage: onError(new Error('Error: Description'))
+                    app2.onRequest('getProfile.1',(msg) =>{
+                        msg.repply({
+                            linkedin_profile:'processed data of calebebrim'
+                        });
+                        app1.readMessages()
+                            // .then(_=>{});
                     });
-                    app1.readMessages()
-                        // .then(_=>{});
-                });
-                
-                app1.onResponse('getProfile.1',function(msg){
-                    // console.log('app1: onResponse getProfile.1')
-                    app2.removeListeners('getProfile.1');
-                    app1.removeListeners('getProfile.1');
-                    msg.should.have.property('data')
-                    msg.data.should.have.property('payload')
-                    msg.data.payload.should.equal('payload');
-                    done();
-                })
-                
-                app1.sendRequest("app2","getProfile.1",{
-                    linkedin_profile:'https://www.linkedin.com.br/in/calebebrim'
-                },"payload").then(_=>app2.readMessages()).catch(done);                
-                
-                
-                
-                
-            }catch(error){
-                done(error)
-            }
+                    
+                    app1.onResponse('getProfile.1',function(msg){
+                        // console.log('app1: onResponse getProfile.1')
+                        app2.removeListeners('getProfile.1');
+                        app1.removeListeners('getProfile.1');
+                        msg.should.have.property('data')
+                        msg.data.should.have.property('payload')
+                        msg.data.payload.should.equal('payload');
+                        done();
+                    })
+                    
+                    app1.sendRequest("app2","getProfile.1",{
+                        linkedin_profile:'https://www.linkedin.com.br/in/calebebrim'
+                    },"payload").then(_=>app2.readMessages()).catch(done);                
+                    
+                    
+                    
+                    
+                }catch(error){
+                    done(error)
+                }
         }).timeout(60000)
 
         it('Send to inexistent app',function(done){
             app1.sendRequest("unknown","unknown",{
                 linkedin_profile:'https://www.linkedin.com.br/in/calebebrim' 
             },"jobid=1").then(_=>done(new Error('Should not execute sucessfully'))).catch(err=>{
-                if(/^ServiceNotFoundError:.*/.test(err.message)) done();
-                else done(new Error('Incorrect Error Message: '+err.message))
+                if(/^ServiceNotFoundError:.*/.test(err.message)) done()
+                else done(err)
             });
         })
         
@@ -282,20 +310,74 @@ describe('General',function(){
         before(b)
         after(a)
         var app1,app2,app3;
-        it('Initialize App1',function(){
-            throw new Error('not implemented')
+        it('Initialize',function(){
+            var config = clone(require('./hapi.test.peoplesearch.worker.json'));
+            config.app = 'app3'
+            config.worker = 'app3'
+            config.log.debug = false
+            config.log.info  = false;
+            
+            app3 = new HAPI(config);
+            app3.initialize().then(_=>{
+                var config = clone(require('./hapi.test.peoplesearch.worker.json'));
+                config.app = 'app2'
+                config.worker = 'app2'
+                config.log.debug = false
+                config.log.info  = false;
+                
+                app2 = new HAPI(config);
+                app2.initialize().then(_=>{
+                    var config = clone(require('./hapi.test.peoplesearch.worker.json'));
+                    
+                    config.app = 'app1'
+                    config.worker = 'app1'
+                    config.log.debug = false;
+                    config.log.info  = false;
+    
+                    app1 = new HAPI(config)
+                    app1.initialize().then(_=>done()).catch(done)
+                })
+            })
         })
 
-        it('Initialize App2',function(){
-            throw new Error('not implemented')
-        })
+        it('Send Message',function(){
+            try{
+                /// onError: callback to use when processing procedure wasn't executed sucessfully.
+                ///          usage: onError(new Error('Error: Description'))
+                app2.onRequest('getProfile.1',(msg,resolve,onError) =>{
+                    msg.repply({
+                        linkedin_profile:'processed data of calebebrim'
+                    });
+                    app3.readMessages()
+                });
 
-        it('Initialize App3',function(){
-            throw new Error('not implemented')
-        })
+                app2.onRequest('getProfile.1',(msg,resolve,onError) =>{
+                    
+                    app3.readMessages()
+                });
 
-        it('Send Message app1>app2',function(){
-            throw new Error('not implemented');            
+                // app2.onResponse('getProfile.1',)
+                
+                app1.onResponse('getProfile.1',function(msg){
+                    // console.log('app1: onResponse getProfile.1')
+                    app2.removeListeners('getProfile.1');
+                    app1.removeListeners('getProfile.1');
+                    msg.should.have.property('data')
+                    msg.data.should.have.property('payload')
+                    msg.data.payload.should.equal('payload');
+                    done();
+                })
+                
+                app1.sendRequest("app2","getProfile.1",{
+                    linkedin_profile:'https://www.linkedin.com.br/in/calebebrim'
+                },"payload").then(_=>app2.readMessages()).catch(done);                
+                
+                
+                
+                
+            }catch(error){
+                done(error)
+            }
         })
 
         it('Send Message app2>app3',function(done){

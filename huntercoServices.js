@@ -21,8 +21,8 @@ module.exports = class API{
         }
         if(typeof config === 'string'){
             require('colors')
-            console.log(`Configuring using path string`)
-            this.configuration = require(config);
+            // console.log(`Configuring using path string`)
+            this.configuration = Object.assign({},require(config));
         }else if(typeof config === 'object'){
             this.configuration = config;
         }else if(config || config==null){
@@ -40,8 +40,7 @@ function initLogger(self){
     return new Promise(function(resolve,reject){
         try {
             require('colors')
-            
-            console.log('Initializing logger'.gray)
+            if(self.configuration.log && self.configuration.log.debug){ console.log('Initializing logger'.gray)}
             class Logger{
                 constructor(tag,color,active){
                     this.tag = tag;
@@ -98,14 +97,17 @@ function setUpAPI(self){
             // self.service = {}
             self.startup = new Date();
             // self.service.name = self.configuration.app;
-            if(!self.configuration.worker) throw self.errors.AppWithoutId()
-            self.onRequest = onRequest;
-            self.onResponse = onResponse;
-            self.readMessages = readMessages;
-            self.removeListeners = removeListeners;
-            self.sendRequest = sendRequest
+            if(!self.configuration.worker) {
+                reject(self._errors.AppWithoutId())
+            }else{
+                self.onRequest = onRequest;
+                self.onResponse = onResponse;
+                self.readMessages = readMessages;
+                self.removeListeners = removeListeners;
+                self.sendRequest = sendRequest
+                resolve(self)            
+            }
             
-            resolve(self)            
         } catch (error) {
             reject(error)
         }
@@ -116,11 +118,12 @@ function configureErrors(self){
     return new Promise(function(resolve,reject){
         try {
             self._logger.debug.log('Initializing errors')
-            self.errors = {};
-            self.errors.AppNotRegistered = _=> new Error('AppNotRegisteredError: App must be registered with an valid identifier.')
-            self.errors.WrongAppId = _=> new Error('WrongAppIdError: Incorrect number of queues, App identification is not valid for this API.')
-            self.errors.AppWithoutId = _=> new Error('AppWithoutIdError: App must be registered with an identifier.')
-            self.errors.ServiceNotFound = _=> new Error('ServiceNotFoundError: Sending Request to an Inexistent app')
+            self._errors = {};
+            self._errors.AppNotRegistered = _=> new Error('AppNotRegisteredError: App must be registered with an valid identifier.')
+            self._errors.sqsNotInitialized = _=> new Error('SqsNotInitializedError: call \'api.initialize()\' first.')
+            self._errors.WrongAppId = _=> new Error('WrongAppIdError: Incorrect number of queues, App identification is not valid for this API.')
+            self._errors.AppWithoutId = _=> new Error('AppWithoutIdError: App must be registered with an identifier.')
+            self._errors.ServiceNotFound = _=> new Error('ServiceNotFoundError: Sending Request to an Inexistent app')
             resolve(self)            
         } catch (error) {
             reject(error)
@@ -249,13 +252,13 @@ function getSQSarns(self){
                                 .then(resolve)
                                 .catch(reject);
                         }else{
-                            reject(self.errors.AppNotRegistered())
+                            reject(self._errors.AppNotRegistered())
                         }
                     }else{
                         furls = data.QueueUrls.filter(url=>url.indexOf(self.service.name)>=0)
                         if(furls.length==0){
                             if(!self.configuration.aws.sqs.create){
-                                reject(self.errors.AppNotRegistered());
+                                reject(self._errors.AppNotRegistered());
                             }else{
                                 createQueues(self).then(resolve).catch(reject);
                             }
@@ -263,7 +266,7 @@ function getSQSarns(self){
                         else if(furls.length!=2){
                             self._logger.debug.log(furls)
                             if(!self.configuration.aws.sqs.create){
-                                reject(self.errors.WrongAppId())
+                                reject(self._errors.WrongAppId())
                             }else{ 
                                 Promise.all(furls.map(url => deleteQueue(self,url)))
                                     .then(createQueues)
@@ -284,17 +287,31 @@ function getSQSarns(self){
 function createQueuesIfDontExist(self){
     self._logger.debug.log('Creating queues for this app if not exists.')
     return new Promise((resolve,reject)=>{
-        Promise.all(
-            [self.configuration.app+'_request'
-                    ,self.configuration.app+'_response']
-                    .filter(function(url){
-                        if(self.aws.sqs.urls)return self.aws.sqs.urls.filter(surl=>new RegExp(url).test()).length==0;
-                        else false;
-                    })
-                    .map(function(name){
-                        return createQueue(self,name);
-                    })).then(_=>resolve(self)).catch(reject)
+        if(self.configuration.aws.sqs.create){
+            Promise.all(
+                [
+                    self.configuration.app+'_request'
+                    ,self.configuration.app+'_response'
+                ]
+                .filter(function(url){
+                    if(self.aws.sqs.urls) return self.aws.sqs.urls.filter(surl=>url===surl).length==0;
+                    else false;
                 })
+                .map(function(name){
+                    return createQueue(self,name);
+                })).then(_=>resolve(self)).catch(reject)
+        }else{
+            if(self.aws.sqs.urls
+                .filter(url=>
+                    new RegExp(`^${self.configuration.app}_(request|response)`).test(url))
+                .length==2){
+                resolve(self);
+            }else{
+                reject(self._errors.AppNotRegistered());
+            }
+
+        }
+    })
                 
 }
 
@@ -406,25 +423,25 @@ function handleResponse(self,message){
 function handleRequest(self,message){
     return new Promise(function(resolve,reject){
         message.repply = function(data){
+
             return sendResponse(self,this,data);
         }
         message.sendError = function(err){
             return sendResponse(self,this,{error:{message:err.message}})
         }
         self._logger.debug.log(`Request => ${message.data.service}`);
-        new Promise(function(resolve,reject){
-            try {
-                self._handler.request[message.data.service](message,resolve,reject);
-            } catch (error) {
-                if(/.*is not a function$/.test(error.message)) message.sendError(new Error('UnknowMethodError: Service does not have required \'unknown\' service.')).then(resolve).catch(reject);    
-            }
-        }).then(response=>{
-            message.repply(response).then(_=>resolve(self)).catch(reject)
-        }).catch(reject)
-        
-    
-        
-
+        try {
+            self._handler.request[message.data.service](message);        
+        } catch (error) {
+            if(/.*is not a function$/.test(error.message)) { message.sendError(new Error('UnknowMethodError: Service does not have required \'unknown\' service.')).then(resolve).catch(reject);}
+            else reject(error);
+        }
+        resolve(self)
+        // new Promise(function(resolve,reject){
+            
+        // }).then(response=>{
+        //     message.repply(response).then(_=>resolve(self)).catch(reject)
+        // }).catch(reject)
     })
 }
 function removeListeners(event){
@@ -464,40 +481,45 @@ function sendResponse(self,message,response){
 function sendRequest(to,service,body,payload){
     var self = this;
     return new Promise(function(resolve,reject){
-        updateQueuesUrlsFromServer(self)
-            .then(getRegisteredSQSAttibutes)
-            .then(function(){
-                try {   
-                    var request_service = self.aws.sqs.urls.filter(url=>new RegExp(`${to}_request$`).test(url))[0]
-                    var response_service = self.aws.sqs.urls.filter(url=>new RegExp(`${self.configuration.app}_response$`).test(url))[0]
-                    if(!request_service) throw self.errors.ServiceNotFound() //new Error('ServiceNotFoundError: Sending Request to an Inexistent app')
-                    self._logger.info.log(`to: ${to}, service: ${service}, payload: ${payload}, url:${request_service}`)
-                    // var attrs = []; for( att in self.aws.sqs.queue[request_service]){attrs.push(att)}
-                    // self.aws.sqs.queue
-                    var data = {
-                        body:body,
-                        service:service,
-                        callback:response_service,
-                        payload:payload
-                    }
-                    if((payload && payload==="") || (payload && payload == null)) delete data.payload;
-                    var send_params = {
-                        MessageBody: JSON.stringify(data) /* required */ ,
-                        QueueUrl: request_service /* required */ ,
-                        DelaySeconds: 0
-                    };
-                    self.aws.sqs.api.sendMessage(send_params, function(err, data) {
-                        if (err) {
-                            reject(err)
-                        } else {
-                            self._logger.debug.log('message sent')
-                            resolve(data)   
+        if(self.aws.sqs.api){
+            updateQueuesUrlsFromServer(self)
+                .then(getRegisteredSQSAttibutes)
+                .then(function(){
+                    try {   
+                        var request_service = self.aws.sqs.urls.filter(url=>new RegExp(`${to}_request$`).test(url))[0]
+                        var response_service = self.aws.sqs.urls.filter(url=>new RegExp(`${self.configuration.app}_response$`).test(url))[0]
+                        if(!request_service) throw self._errors.ServiceNotFound() //new Error('ServiceNotFoundError: Sending Request to an Inexistent app')
+                        self._logger.info.log(`to: ${to}, service: ${service}, payload: ${payload}, url:${request_service}`)
+                        // var attrs = []; for( att in self.aws.sqs.queue[request_service]){attrs.push(att)}
+                        // self.aws.sqs.queue
+                        var data = {
+                            body:body,
+                            service:service,
+                            callback:response_service,
+                            payload:payload
                         }
-                    });
-                } catch (error) {
-                    reject(error)
-                }
-            }).catch(reject)
+                        if((payload && payload==="") || (payload && payload == null)) delete data.payload;
+                        var send_params = {
+                            MessageBody: JSON.stringify(data) /* required */ ,
+                            QueueUrl: request_service /* required */ ,
+                            DelaySeconds: 0
+                        };
+                        self.aws.sqs.api.sendMessage(send_params, function(err, data) {
+                            if (err) {
+                                reject(err)
+                            } else {
+                                self._logger.debug.log('message sent')
+                                resolve(data)   
+                            }
+                        });
+                    } catch (error) {
+                        reject(error)
+                    }
+                }).catch(reject)
+            
+        }else{
+            reject(self._errors.sqsNotInitialized())
+        }
         
         
 
