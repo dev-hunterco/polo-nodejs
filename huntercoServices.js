@@ -437,11 +437,6 @@ function handleRequest(self,message){
             else reject(error);
         }
         resolve(self)
-        // new Promise(function(resolve,reject){
-            
-        // }).then(response=>{
-        //     message.repply(response).then(_=>resolve(self)).catch(reject)
-        // }).catch(reject)
     })
 }
 function removeListeners(event){
