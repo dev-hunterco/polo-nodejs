@@ -1,5 +1,5 @@
 {
-  "name": "aws_queue",
+  "name": "hunterAPI",
   "version": "1.0.0",
   "description": "",
   "main": "index.js",
