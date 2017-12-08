@@ -2,7 +2,7 @@
   "name": "hunter-api",
   "version": "1.0.0",
   "description": "",
-  "main": "index.js",
+  "main": "huntercoServices.js",
   "dependencies": {
     "aws-sdk": "^2.142.0",
     "colors": "^1.1.2",
