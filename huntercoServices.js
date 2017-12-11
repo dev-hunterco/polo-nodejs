@@ -379,11 +379,11 @@ function consumeSQS(self,url) {
                     Promise.all(data.Messages.map(m => {
                         m.data = JSON.parse(m.Body);
                         if(/_request$/i.test(url)){
-                            return handleRequest(self,m);
+                            return handleRequest(self,m).then(message=>deleteMessage(url,message));
                         } else if(/_response$/i.test(url)){
-                            return handleResponse(self,m);
+                            return handleResponse(self,m).then(message=>deleteMessage(url,message));
                         } else {
-                            self._logger.err.log(new Error('UnknownUrl: urls cant ben set manually'));
+                            self._logger.err.log(new Error('UnknownUrl: urls can\'t ben set manually'));
                             return false;
                         }
                     })).then(_=>resolve(self)).catch(reject);
@@ -398,14 +398,19 @@ function consumeSQS(self,url) {
     })
 }
 
-function deleteMessage(){
-    var entries = data.Messages.map(m => { return { Id: m.MessageId, ReceiptHandle: m.ReceiptHandle } })
-    self.aws.sqs.api.deleteMessageBatch({
-        Entries: entries, 
-        QueueUrl: url }, function(err, data) {
-            if (err) self._logger.err.log(err);
-            else self._logger.info.log(`Messages deleted: ${JSON.stringify(entries)}`)
-    });
+function deleteMessage(queue,message){
+    return new Promise(function(resolve,reject){
+        var entries = data.Messages.map(m => { return { Id: m.MessageId, ReceiptHandle: m.ReceiptHandle } })
+        self.aws.sqs.api.deleteMessage({
+            QueueUrl:queue , 
+            ReceiptHandle:message.ReceiptHandle }, function(err, data) {
+                if (err) reject(err);
+                else { 
+                    self._logger.info.log(`Message deleted: ${JSON.stringify(message,undefined,3)}`)
+                    resolve()
+                }
+        });
+    })
 }
 
 function handleResponse(self,message){
@@ -467,7 +472,7 @@ function sendResponse(self,message,response){
                 reject(err)
             } else {
                 self._logger.debug.log('Response sent')        
-                resolve(data)   
+                resolve(message)   
             }
         });
     })
