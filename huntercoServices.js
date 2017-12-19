@@ -429,10 +429,10 @@ function handleRequest(self,message){
     return new Promise(function(resolve,reject){
         message.repply = function(data){
 
-            return sendResponse(self,this,data);
+            return sendResponse(self,this,data).then(resolve).catch(reject);
         }
         message.sendError = function(err){
-            return sendResponse(self,this,{error:{message:err.message}})
+            return sendResponse(self,this,{error:{message:err.message}}).then(resolve).catch(reject);
         }
         self._logger.debug.log(`Request => ${message.data.service}`);
         try {
