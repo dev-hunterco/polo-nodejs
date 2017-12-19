@@ -294,7 +294,9 @@ function createQueuesIfDontExist(self){
                     ,self.configuration.app+'_response'
                 ]
                 .filter(function(url){
-                    if(self.aws.sqs.urls) return self.aws.sqs.urls.filter(surl=>url===surl).length==0;
+                    if(self.aws.sqs.urls) return self.aws.sqs.urls.filter(surl=>{
+                        new RegExp(url).test(surl)
+                    }).length==0;
                     else false;
                 })
                 .map(function(name){
@@ -358,7 +360,9 @@ function readMessages(){
         self._logger.debug.log('Read Messages')
         Promise.all(self.aws.sqs.urls.filter(
             url=>new RegExp(self.configuration.app).test(url))
-            .map(url=>consumeSQS(self,url))).then(_=>resolve(self)).catch(reject);
+            .map(url=>{
+                consumeSQS(self,url)
+            })).then(_=>resolve(self)).catch(reject);
         })
 
             
