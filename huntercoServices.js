@@ -295,7 +295,7 @@ function createQueuesIfDontExist(self){
                 ]
                 .filter(function(url){
                     if(self.aws.sqs.urls) return self.aws.sqs.urls.filter(surl=>{
-                        new RegExp(url).test(surl)
+                        return new RegExp(url).test(surl)
                     }).length==0;
                     else false;
                 })
@@ -359,10 +359,12 @@ function readMessages(){
     return new Promise(function(resolve,reject){
         self._logger.debug.log('Read Messages')
         Promise.all(self.aws.sqs.urls.filter(
-            url=>new RegExp(self.configuration.app).test(url))
-            .map(url=>{
-                consumeSQS(self,url)
-            })).then(_=>resolve(self)).catch(reject);
+                url=>new RegExp(self.configuration.app).test(url)
+            ).map(url=>{
+                return consumeSQS(self,url)
+            })).then(_=>{
+                resolve(self)
+            }).catch(reject);
         })
 
             
@@ -383,9 +385,13 @@ function consumeSQS(self,url) {
                     Promise.all(data.Messages.map(m => {
                         m.data = JSON.parse(m.Body);
                         if(/_request$/i.test(url)){
-                            return handleRequest(self,m).then(message=>deleteMessage(url,message));
+                            return handleRequest(self,m).then(message=>{
+                                deleteMessage(self,url,message)
+                            });
                         } else if(/_response$/i.test(url)){
-                            return handleResponse(self,m).then(message=>deleteMessage(url,message));
+                            return handleResponse(self,m).then(message=>{
+                                deleteMessage(self,url,message)
+                            });
                         } else {
                             self._logger.err.log(new Error('UnknownUrl: urls can\'t ben set manually'));
                             return false;
@@ -402,9 +408,9 @@ function consumeSQS(self,url) {
     })
 }
 
-function deleteMessage(queue,message){
+function deleteMessage(self,queue,message){
+
     return new Promise(function(resolve,reject){
-        var entries = data.Messages.map(m => { return { Id: m.MessageId, ReceiptHandle: m.ReceiptHandle } })
         self.aws.sqs.api.deleteMessage({
             QueueUrl:queue , 
             ReceiptHandle:message.ReceiptHandle }, function(err, data) {
@@ -432,12 +438,19 @@ function handleResponse(self,message){
 function handleRequest(self,message){
     return new Promise(function(resolve,reject){
         message.repply = function(data){
+            return new Promise(function(rresolve,rreject){
+                sendResponse(self,message,data).then(p =>{
+                    resolve(message);rresolve(); 
+                }).catch(p=>{reject(p);rreject(p)});
+            })
+        }
 
-            return sendResponse(self,this,data).then(resolve).catch(reject);
-        }
         message.sendError = function(err){
-            return sendResponse(self,this,{error:{message:err.message}}).then(resolve).catch(reject);
+            return new Promise(function(rresolve,rreject){
+                sendResponse(self,message,{error:{message:err.message}}).then(p =>{resolve(message);rresolve(); }).catch(p=>{reject(p);rreject(p)});
+            })
         }
+
         self._logger.debug.log(`Request => ${message.data.service}`);
         try {
             self._handler.request[message.data.service](message);        
@@ -445,7 +458,7 @@ function handleRequest(self,message){
             if(/.*is not a function$/.test(error.message)) { message.sendError(new Error('UnknowMethodError: Service does not have required \'unknown\' service.')).then(resolve).catch(reject);}
             else reject(error);
         }
-        resolve(self)
+
     })
 }
 function removeListeners(event){
@@ -456,29 +469,34 @@ function removeListeners(event){
 
 function sendResponse(self,message,response){
     return new Promise(function(resolve,reject){
-        self._logger.info.log('Sending response to '+message.data.callback)
-        var response_service = message.data.callback
-        if(!response_service) reject(new Error('Can\'t Respond Message: Provided message does not have response service'))
-        var data = {
-            response:response,
-            payload:message.data.payload,
-            service:message.data.service
-        }
-        
-        var send_params = {
-            MessageBody: JSON.stringify(data) /* required */ ,
-            QueueUrl: response_service /* required */ ,
-            DelaySeconds: 0
-        };
-
-        self.aws.sqs.api.sendMessage(send_params, function(err, data) {
-            if (err) {
-                reject(err)
-            } else {
-                self._logger.debug.log('Response sent')        
-                resolve(message)   
+        try{
+            self._logger.info.log('Sending response to '+message.data.callback)
+            var response_service = message.data.callback
+            if(!response_service) reject(new Error('Can\'t Respond Message: Provided message does not have response service'))
+            var data = {
+                response:response,
+                payload:message.data.payload,
+                service:message.data.service
             }
-        });
+            
+            var send_params = {
+                MessageBody: JSON.stringify(data) /* required */ ,
+                QueueUrl: response_service /* required */ ,
+                DelaySeconds: 0
+            };
+    
+            self.aws.sqs.api.sendMessage(send_params, function(err, data) {
+                if (err) {
+                    reject(err)
+                } else {
+                    self._logger.debug.log('Response sent')        
+                    resolve(message)   
+                }
+            });
+
+        }catch(err){
+            reject(err)
+        }
     })
 };
 
