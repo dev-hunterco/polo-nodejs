@@ -73,23 +73,9 @@ function initializeHapi(hapi,done){
             hapi.aws.sqs.should.have
                 .property('queue')
                     .which.is.a.Object()
-                    .and.have.property('http://localhost:4576/queue/br_com_hunterco_service_peoplesearch_request')
+                    .and.have.property('http://localhost:4576/queue/br_com_hunterco_service_peoplesearch')
                         .which.is.an.Object()
                         
-            hapi.aws.sqs.should.have
-                .property('queue')
-                    .which.is.a.Object()
-                    .and.have.property('http://localhost:4576/queue/br_com_hunterco_service_peoplesearch_response')
-                        .which.is.an.Object()
-            
-            hapi.aws.sqs.queue['http://localhost:4576/queue/br_com_hunterco_service_peoplesearch_response']
-                .should.have.property('QueueArn')
-                .which.is.an.String()
-                
-            
-            hapi.aws.sqs.queue['http://localhost:4576/queue/br_com_hunterco_service_peoplesearch_response']
-                .should.have.property('QueueArn')
-                .which.is.an.String()
                 
             done()
 

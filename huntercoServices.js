@@ -235,54 +235,54 @@ function updateQueuesUrlsFromServer(self){
     })
 }
 
-function getSQSarns(self){
-    return new Promise(function(resolve,reject){
-        try {
-            self._logger.debug.log('Initializing Queues')
-            var params = {
-                QueueNamePrefix: self.service.name
-            };
-            self.aws.sqs.api.listQueues(params, function(err, data) {
-                if (err) {
-                    reject(err)
-                } else {
-                    if(!data.QueueUrls) {
-                        if(self.configuration.aws.sqs.create){
-                            createQueues(self)
-                                .then(resolve)
-                                .catch(reject);
-                        }else{
-                            reject(self._errors.AppNotRegistered())
-                        }
-                    }else{
-                        furls = data.QueueUrls.filter(url=>url.indexOf(self.service.name)>=0)
-                        if(furls.length==0){
-                            if(!self.configuration.aws.sqs.create){
-                                reject(self._errors.AppNotRegistered());
-                            }else{
-                                createQueues(self).then(resolve).catch(reject);
-                            }
-                        }
-                        else if(furls.length!=2){
-                            self._logger.debug.log(furls)
-                            if(!self.configuration.aws.sqs.create){
-                                reject(self._errors.WrongAppId())
-                            }else{ 
-                                Promise.all(furls.map(url => deleteQueue(self,url)))
-                                    .then(createQueues)
-                                    .then(resolve)
-                                    .catch(reject)
+// function getSQSarns(self){
+//     return new Promise(function(resolve,reject){
+//         try {
+//             self._logger.debug.log('Initializing Queues')
+//             var params = {
+//                 QueueNamePrefix: self.service.name
+//             };
+//             self.aws.sqs.api.listQueues(params, function(err, data) {
+//                 if (err) {
+//                     reject(err)
+//                 } else {
+//                     if(!data.QueueUrls) {
+//                         if(self.configuration.aws.sqs.create){
+//                             createQueues(self)
+//                                 .then(resolve)
+//                                 .catch(reject);
+//                         }else{
+//                             reject(self._errors.AppNotRegistered())
+//                         }
+//                     }else{
+//                         furls = data.QueueUrls.filter(url=>url.indexOf(self.service.name)>=0)
+//                         if(furls.length==0){
+//                             if(!self.configuration.aws.sqs.create){
+//                                 reject(self._errors.AppNotRegistered());
+//                             }else{
+//                                 createQueues(self).then(resolve).catch(reject);
+//                             }
+//                         }
+//                         else if(furls.length!=2){
+//                             self._logger.debug.log(furls)
+//                             if(!self.configuration.aws.sqs.create){
+//                                 reject(self._errors.WrongAppId())
+//                             }else{ 
+//                                 Promise.all(furls.map(url => deleteQueue(self,url)))
+//                                     .then(createQueues)
+//                                     .then(resolve)
+//                                     .catch(reject)
     
-                            }
-                        }
-                    }       
-                }
-            });
-        } catch (error) {
-            reject(error)
-        }
-    })
-}
+//                             }
+//                         }
+//                     }       
+//                 }
+//             });
+//         } catch (error) {
+//             reject(error)
+//         }
+//     })
+// }
 
 function createQueuesIfDontExist(self){
     self._logger.debug.log('Creating queues for this app if not exists.')
@@ -290,14 +290,14 @@ function createQueuesIfDontExist(self){
         if(self.configuration.aws.sqs.create){
             Promise.all(
                 [
-                    self.configuration.app+'_request'
-                    ,self.configuration.app+'_response'
+                    self.configuration.app
                 ]
                 .filter(function(url){
-                    if(self.aws.sqs.urls) return self.aws.sqs.urls.filter(surl=>{
-                        return new RegExp(url).test(surl)
-                    }).length==0;
-                    else false;
+                    if(self.aws.sqs.urls) 
+                        return self.aws.sqs.urls.filter(surl=>{
+                            return new RegExp(url).test(surl)
+                        }).length==0;
+                    else true;
                 })
                 .map(function(name){
                     return createQueue(self,name);
@@ -305,8 +305,8 @@ function createQueuesIfDontExist(self){
         }else{
             if(self.aws.sqs.urls
                 .filter(url=>
-                    new RegExp(`^${self.configuration.app}_(request|response)`).test(url))
-                .length==2){
+                    new RegExp(`${self.configuration.app}`).test(url))
+                .length==1){
                 resolve(self);
             }else{
                 reject(self._errors.AppNotRegistered());
@@ -384,11 +384,13 @@ function consumeSQS(self,url) {
                     self._logger.info.log(`Received ${data.Messages.length} message(s) from queue ${url}.`);
                     Promise.all(data.Messages.map(m => {
                         m.data = JSON.parse(m.Body);
-                        if(/_request$/i.test(url)){
+
+                        if(m.data.type === 'request'){
+                        // if(/_request$/i.test(url)){
                             return handleRequest(self,m).then(message=>{
                                 deleteMessage(self,url,message)
                             });
-                        } else if(/_response$/i.test(url)){
+                        } else if(m.data.type === 'response'){
                             return handleResponse(self,m).then(message=>{
                                 deleteMessage(self,url,message)
                             });
@@ -476,7 +478,8 @@ function sendResponse(self,message,response){
             var data = {
                 response:response,
                 payload:message.data.payload,
-                service:message.data.service
+                service:message.data.service,
+                type:"response"
             }
             
             var send_params = {
@@ -508,8 +511,8 @@ function sendRequest(to,service,body,payload){
                 .then(getRegisteredSQSAttibutes)
                 .then(function(){
                     try {   
-                        var request_service = self.aws.sqs.urls.filter(url=>new RegExp(`${to}_request$`).test(url))[0]
-                        var response_service = self.aws.sqs.urls.filter(url=>new RegExp(`${self.configuration.app}_response$`).test(url))[0]
+                        var request_service = self.aws.sqs.urls.filter(url=>new RegExp(`${to}`).test(url))[0]
+                        var response_service = self.aws.sqs.urls.filter(url=>new RegExp(`${self.configuration.app}$`).test(url))[0]
                         if(!request_service) throw self._errors.ServiceNotFound() //new Error('ServiceNotFoundError: Sending Request to an Inexistent app')
                         self._logger.info.log(`to: ${to}, service: ${service}, payload: ${payload}, url:${request_service}`)
                         // var attrs = []; for( att in self.aws.sqs.queue[request_service]){attrs.push(att)}
@@ -518,8 +521,10 @@ function sendRequest(to,service,body,payload){
                             body:body,
                             service:service,
                             callback:response_service,
-                            payload:payload
+                            payload:payload,
+                            type:"request"
                         }
+
                         if((payload && payload==="") || (payload && payload == null)) delete data.payload;
                         var send_params = {
                             MessageBody: JSON.stringify(data) /* required */ ,
