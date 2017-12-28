@@ -381,7 +381,7 @@ function consumeSQS(self,url) {
                 self._logger.err.log(err);
             } else {
                 if (data.Messages && data.Messages.length > 0) {
-                    self._logger.info.log(`Received ${data.Messages.length} message(s) from queue ${url}.`);
+                    self._logger.debug.log(`Received ${data.Messages.length} message(s) from queue ${url}.`);
                     Promise.all(data.Messages.map(m => {
                         m.data = JSON.parse(m.Body);
 
@@ -395,7 +395,7 @@ function consumeSQS(self,url) {
                                 deleteMessage(self,url,message)
                             });
                         } else {
-                            self._logger.err.log(new Error('UnknownUrl: urls can\'t ben set manually'));
+                            self._logger.err.log(new Error(`UnknownDataType: message data.type should be "request"  or "response", received: ${data.type}`));
                             return false;
                         }
                     })).then(_=>resolve(self)).catch(reject);
@@ -413,6 +413,7 @@ function consumeSQS(self,url) {
 function deleteMessage(self,queue,message){
 
     return new Promise(function(resolve,reject){
+        self._logger.debug.log(`Deleting message: ${message.ReceipHandle}`)
         self.aws.sqs.api.deleteMessage({
             QueueUrl:queue , 
             ReceiptHandle:message.ReceiptHandle }, function(err, data) {
