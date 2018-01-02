@@ -443,7 +443,7 @@ function handleResponse(self,message){
     return new Promise(function(resolve,reject){
         try {
             self._logger.debug.log(`Response => ${message.data.service}`);
-            self._handler.response[message.data.service](message,resolve,reject)
+            self._handler.response[message.data.service](message)
             resolve()
         } catch (error) {
             reject(error)
