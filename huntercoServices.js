@@ -384,18 +384,31 @@ function consumeSQS(self,url) {
                     self._logger.debug.log(`Received ${data.Messages.length} message(s) from queue ${url}.`);
                     Promise.all(data.Messages.map(m => {
                         m.data = JSON.parse(m.Body);
+                        var handlerFnc = (m.data.type === 'request')?handleRequest:handleResponse;
+                        if(/request|response/i.test(m.data.type)){
+                            return new Promise(function(resolve,reject){
+                                handlerFnc(self,m).then(message=>{
+                                    /**
+                                     * Caso handlerFnc retorne uma mensagem enviar a mensagem processada.
+                                     * Caso contrário ele só deleta a mensagem processada.
+                                     */
+                                    if(message){ 
+                                        sendResponse(self,message).then(p =>{
+                                            deleteMessage(self,url,message).then(resolve).catch(reject)    
+                                        }).catch(reject);
+                                    }else{
+                                        deleteMessage(self,url,m).then(resolve).catch(reject)        
+                                    }
+                                }).catch(err=>{
+                                    self._logger.error.log("Process handler function error: ",err)
+                                    
+                                    // setMessageTimeout(self,message,0).then(p =>{resolve(message);rresolve(); }).catch(p=>{reject(p);rreject(p)});
 
-                        if(m.data.type === 'request'){
-                        // if(/_request$/i.test(url)){
-                            return handleRequest(self,m).then(message=>{
-                                deleteMessage(self,url,message)
-                            });
-                        } else if(m.data.type === 'response'){
-                            return handleResponse(self,m).then(message=>{
-                                deleteMessage(self,url,message)
-                            });
-                        } else {
-                            self._logger.err.log(new Error(`UnknownDataType: message data.type should be "request"  or "response", received: ${data.type}`));
+                                    resolve()
+                                });
+                            }) 
+                        }else{
+                            self._logger.err.log(new Error(`UnknownDataType: message data.type should be "request" or "response", received: ${data.type}`));
                             return false;
                         }
                     })).then(_=>resolve(self)).catch(reject);
@@ -431,7 +444,7 @@ function handleResponse(self,message){
         try {
             self._logger.debug.log(`Response => ${message.data.service}`);
             self._handler.response[message.data.service](message,resolve,reject)
-            resolve(self)
+            resolve()
         } catch (error) {
             reject(error)
         }
@@ -440,26 +453,31 @@ function handleResponse(self,message){
 
 function handleRequest(self,message){
     return new Promise(function(resolve,reject){
-        message.repply = function(data){
-            return new Promise(function(rresolve,rreject){
-                sendResponse(self,message,data).then(p =>{
-                    resolve(message);rresolve(); 
-                }).catch(p=>{reject(p);rreject(p)});
-            })
+        var timeOut = setTimeout(() => {
+            if(!message._data){ reject(new Error('HandlerTimeOutError: Handler method does not resolve provided message with message.reply or message.replyError')); }
+        }, self.configuration.aws.sqs.consume.VisibilityTimeout*1000);
+
+        message.reply = function(data){ //trocar para replyDone
+            clearTimeout(timeOut)
+            message._data = data;
+            resolve(message)
         }
 
-        message.sendError = function(err){
-            return new Promise(function(rresolve,rreject){
-                sendResponse(self,message,{error:{message:err.message}}).then(p =>{resolve(message);rresolve(); }).catch(p=>{reject(p);rreject(p)});
-            })
+        message.replyError = function(err){//trocar para replyError
+            clearTimeout(timeOut)
+            message._data = {error:{message:err.message}};
+            resolve(message)
         }
+
+        
 
         self._logger.debug.log(`Request => ${message.data.service}`);
         try {
             self._handler.request[message.data.service](message);        
         } catch (error) {
-            if(/.*is not a function$/.test(error.message)) { message.sendError(new Error('UnknowMethodError: Service does not have required \'unknown\' service.')).then(resolve).catch(reject);}
-            else reject(error);
+            if(/.*is not a function$/.test(error.message)) { 
+                message.replyError(new Error('UnknowMethodError: Service does not have required \'unknown\' service.')).then(resolve).catch(reject);
+            }else reject(error);
         }
 
     })
@@ -470,14 +488,31 @@ function removeListeners(event){
 } 
 
 
-function sendResponse(self,message,response){
+function setMessageTimeout(self,queue,message,time){
+    return new Promise(function(resolve,reject){
+
+        var params = {
+            QueueUrl: queue, /* required */
+            ReceiptHandle: message.ReceipHandle, /* required */
+            VisibilityTimeout: 0 /* required */
+          };
+        self.aws.sqs.api.changeMessageVisibility(params, function(err, data) {
+            if (err) console.log(err, err.stack); // an error occurred
+            else     console.log(data);           // successful response
+        });
+    })
+}
+
+function sendResponse(self,message){
     return new Promise(function(resolve,reject){
         try{
             self._logger.info.log('Sending response to '+message.data.callback)
             var response_service = message.data.callback
+            
             if(!response_service) reject(new Error('Can\'t Respond Message: Provided message does not have response service'))
+            if(!message._data) reject(new Error('UnprocessedMessageError: Make shure that message was resolved'))
             var data = {
-                response:response,
+                response:message._data,
                 payload:message.data.payload,
                 service:message.data.service,
                 type:"response"

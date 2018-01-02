@@ -42,7 +42,7 @@ function configureAWSLocalStackLChildProcess(){
     
             process.on('beforeExit',function(code){
                 // console.log('terminating child processes')
-                ls.exit(code);  
+                if(ls) ls.exit(code);  
             })            
         } catch (error) {
             reject(err)
@@ -223,18 +223,16 @@ describe('General',function(){
         it('Send and receive message',function(done){
 
                 try{
-                    /// onError: callback to use when processing procedure wasn't executed sucessfully.
-                    ///          usage: onError(new Error('Error: Description'))
+                     
                     app2.onRequest('getProfile.1',(msg) =>{
-                        msg.repply({
+                        msg.reply({
                             linkedin_profile:'processed data of calebebrim'
                         });
                         app1.readMessages()
-                            // .then(_=>{});
+                    
                     });
                     
                     app1.onResponse('getProfile.1',function(msg){
-                        // console.log('app1: onResponse getProfile.1')
                         app2.removeListeners('getProfile.1');
                         app1.removeListeners('getProfile.1');
                         msg.should.have.property('data')
@@ -245,7 +243,9 @@ describe('General',function(){
                     
                     app1.sendRequest("app2","getProfile.1",{
                         linkedin_profile:'https://www.linkedin.com.br/in/calebebrim'
-                    },"payload").then(_=>app2.readMessages()).catch(done);                
+                    },"payload").then(_=>{
+                        app2.readMessages();
+                    }).catch(done);                
                     
                     
                     
@@ -255,6 +255,9 @@ describe('General',function(){
                 }
         }).timeout(60000)
 
+        /**
+         * Producer should validate and return a ServiceNotFoundError
+         */
         it('Send to inexistent app',function(done){
             app1.sendRequest("unknown","unknown",{
                 linkedin_profile:'https://www.linkedin.com.br/in/calebebrim' 
@@ -264,7 +267,9 @@ describe('General',function(){
             });
         })
         
-        
+        /**
+         * App2 must process and return message error with UnknowMethodError
+         */
         it('Test Unknow service',function(done){
             
             app1.onResponse('unknown',function(msg,resolve,reject){
@@ -289,6 +294,8 @@ describe('General',function(){
             
             
         }).timeout(60000)
+
+    
 
     })
 
@@ -331,7 +338,7 @@ describe('General',function(){
                 /// onError: callback to use when processing procedure wasn't executed sucessfully.
                 ///          usage: onError(new Error('Error: Description'))
                 app2.onRequest('getProfile.1',(msg,resolve,onError) =>{
-                    msg.repply({
+                    msg.reply({
                         linkedin_profile:'processed data of calebebrim'
                     });
                     app3.readMessages()
