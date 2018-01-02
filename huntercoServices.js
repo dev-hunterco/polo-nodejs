@@ -454,7 +454,7 @@ function handleResponse(self,message){
 function handleRequest(self,message){
     return new Promise(function(resolve,reject){
         var timeOut = setTimeout(() => {
-            if(!message._data){ reject(new Error('HandlerTimeOutError: Handler method does not resolve provided message with message.reply or message.replyError')); }
+            if(!message._data){ reject(new Error(`HandlerTimeOutError: Handler method does not resolve provided message with message.reply or message.replyError. Trigger timeout after ${self.configuration.aws.sqs.consume.VisibilityTimeout} seconds.`)); }
         }, self.configuration.aws.sqs.consume.VisibilityTimeout*1000);
 
         message.reply = function(data){ //trocar para replyDone

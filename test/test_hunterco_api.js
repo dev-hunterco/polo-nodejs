@@ -295,10 +295,17 @@ describe('General',function(){
             
         }).timeout(60000)
 
-    
+        it('test message read timeout',function(done){
+            done(new Error('not implemented'));
+        });
 
     })
 
+
+
+
+
+    
     describe('Three apps working',function(){
         before(b)
         after(a)
