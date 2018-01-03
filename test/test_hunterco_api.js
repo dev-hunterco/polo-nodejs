@@ -73,7 +73,7 @@ function initializeHapi(hapi,done){
             hapi.aws.sqs.should.have
                 .property('queue')
                     .which.is.a.Object()
-                    .and.have.property('http://localhost:4576/queue/br_com_hunterco_service_peoplesearch')
+                    .and.have.property('http://localhost:4576/queue/br_com_hunterco_service_peoplesearch_test')
                         .which.is.an.Object()
                         
                 
@@ -119,7 +119,7 @@ describe('General',function(){
         }).timeout(20000);
     })
 
-    describe('Initialization Errors',function(){
+    describe.only('Initialization Errors',function(){
         
         before(b)
         after(a)
@@ -144,7 +144,42 @@ describe('General',function(){
             
             
         }).timeout(10000)
+
+        it('Test stage missing',function(done){
+            var HAPI = require(hapipath)
+            var config = clone(require('./hapi.test.peoplesearch.worker.json'));
+            config.app = ""+Math.random();
+            delete config.stage;
+            new HAPI(config).initialize().then(function(){
+                done(new Error('Configuration shoud throw new StageNotSetEsception'))                
+            }).catch(err => {
+                try {
+                    err.should.be.an.instanceOf(Error)
+                    err.should.have.property('message','StageNotSetError: Api stage not configured. Make sure configuration json property stage property is set.')
+                    done() 
+                } catch (error) {
+                    done(error)
+                }
+                
+            })
+            
+            
+            
+        }).timeout(10000)
         
+        it('Test initializa with env.stage',function(done){
+            var HAPI = require(hapipath)
+            var config = clone(require('./hapi.test.peoplesearch.worker.json'));
+            config.app = ""+Math.random();
+            delete config.stage;
+            process.env.stage = 'env';
+            new HAPI(config).initialize().then(function(){
+                config.should.have.property('stage',process.env.stage)
+                done()
+            }).catch(done);
+        }).timeout(10000);
+        
+
         it('Test missing id error',function(done){
             
             var HAPI = require(hapipath)

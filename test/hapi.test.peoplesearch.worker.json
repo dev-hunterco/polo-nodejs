@@ -1,6 +1,7 @@
 {
     "app":"br_com_hunterco_service_peoplesearch",
     "worker":"PeopleSearch",
+    "stage":"test",
     "aws":{
         "api":{
             "accessKeyId": "AKIAJ4YT32ALU6OOIZBA",

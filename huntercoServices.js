@@ -40,7 +40,7 @@ function initLogger(self){
     return new Promise(function(resolve,reject){
         try {
             require('colors')
-            if(self.configuration.log && self.configuration.log.debug){ console.log('Initializing logger'.gray)}
+            if(self.configuration.log || self.configuration.log.debug){ console.log('Initializing logger'.gray)}
             class Logger{
                 constructor(tag,color,active){
                     this.tag = tag;
@@ -96,8 +96,10 @@ function setUpAPI(self){
             self._logger.debug.log('Initializing API')
             // self.service = {}
             self.startup = new Date();
-            // self.service.name = self.configuration.app;
-            if(!self.configuration.worker) {
+            self.configuration.stage = process.env.stage || self.configuration.stage; //sobrescreve stage com a variavel de ambiente stage
+            if(!self.configuration.stage){
+                reject(self._errors.StageNotSet())
+            } else if(!self.configuration.worker) {
                 reject(self._errors.AppWithoutId())
             }else{
                 self.onRequest = onRequest;
@@ -124,6 +126,7 @@ function configureErrors(self){
             self._errors.WrongAppId = _=> new Error('WrongAppIdError: Incorrect number of queues, App identification is not valid for this API.')
             self._errors.AppWithoutId = _=> new Error('AppWithoutIdError: App must be registered with an identifier.')
             self._errors.ServiceNotFound = _=> new Error('ServiceNotFoundError: Sending Request to an Inexistent app')
+            self._errors.StageNotSet = _=> new Error('StageNotSetError: Api stage not configured. Make sure configuration json property stage property is set.')
             resolve(self)            
         } catch (error) {
             reject(error)
@@ -290,7 +293,7 @@ function createQueuesIfDontExist(self){
         if(self.configuration.aws.sqs.create){
             Promise.all(
                 [
-                    self.configuration.app
+                    self.configuration.app + "_" + self.configuration.stage
                 ]
                 .filter(function(url){
                     if(self.aws.sqs.urls) 
@@ -305,7 +308,7 @@ function createQueuesIfDontExist(self){
         }else{
             if(self.aws.sqs.urls
                 .filter(url=>
-                    new RegExp(`${self.configuration.app}`).test(url))
+                    new RegExp(`${self.configuration.app}_${self.configuration.stage}`).test(url))
                 .length==1){
                 resolve(self);
             }else{
@@ -359,7 +362,7 @@ function readMessages(){
     return new Promise(function(resolve,reject){
         self._logger.debug.log('Read Messages')
         Promise.all(self.aws.sqs.urls.filter(
-                url=>new RegExp(self.configuration.app).test(url)
+                url=>new RegExp(`${self.configuration.app}_${self.configuration.stage}`).test(url)
             ).map(url=>{
                 return consumeSQS(self,url)
             })).then(_=>{
@@ -547,8 +550,8 @@ function sendRequest(to,service,body,payload){
                 .then(getRegisteredSQSAttibutes)
                 .then(function(){
                     try {   
-                        var request_service = self.aws.sqs.urls.filter(url=>new RegExp(`${to}`).test(url))[0]
-                        var response_service = self.aws.sqs.urls.filter(url=>new RegExp(`${self.configuration.app}$`).test(url))[0]
+                        var request_service = self.aws.sqs.urls.filter(url=>new RegExp(`${to}_${self.configuration.stage}`).test(url))[0]
+                        var response_service = self.aws.sqs.urls.filter(url=>new RegExp(`${self.configuration.app}_${self.configuration.stage}$`).test(url))[0]
                         if(!request_service) throw self._errors.ServiceNotFound() //new Error('ServiceNotFoundError: Sending Request to an Inexistent app')
                         self._logger.info.log(`to: ${to}, service: ${service}, payload: ${payload}, url:${request_service}`)
                         // var attrs = []; for( att in self.aws.sqs.queue[request_service]){attrs.push(att)}
