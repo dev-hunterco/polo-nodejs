@@ -449,7 +449,8 @@ function handleResponse(self,message){
             self._handler.response[message.data.service](message)
             resolve()
         } catch (error) {
-            reject(error)
+            console.error(error);
+            resolve()
         }
     })
 }
@@ -564,7 +565,7 @@ function sendRequest(to,service,body,payload){
                             type:"request"
                         }
 
-                        if((payload && payload==="") || (payload && payload == null)) delete data.payload;
+                        if((payload && payload==="") || (payload && payload == null)) delete data.payload;                      
                         var send_params = {
                             MessageBody: JSON.stringify(data) /* required */ ,
                             QueueUrl: request_service /* required */ ,
