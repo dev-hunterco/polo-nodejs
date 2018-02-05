@@ -1,12 +1,12 @@
 {
-    "app":"br_com_hunterco_service_peoplesearch",
-    "worker":"PeopleSearch",
+    "app":"TestApp",
+    "worker":"test",
     "stage":"test",
     "aws":{
         "api":{
-            "accessKeyId": "AKIAJ4YT32ALU6OOIZBA",
-            "secretAccessKey": "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",
-            "region": "us-west-2"
+            "accessKeyId": "foobar",
+            "secretAccessKey": "foobar",
+            "region": "us-east-1"
         },
         "sqs":{
             "create":true,

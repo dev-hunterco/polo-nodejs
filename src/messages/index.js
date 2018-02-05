@@ -1,138 +1,363 @@
-
+const logger = require('winston')
+const AWS = require('aws-sdk')
+const clone = require('clone')
+const os = require('os')
 var Promise = require('promise')
 
-module.exports = class API{
-    constructor(config){
-        var self = this;
-        this.initialize = function(){ 
-            return new Promise((resolve,reject)=>{
-                try {                    
-                    initLogger(self)
-                        .then(configureErrors)
-                        .then(setUpAPI)
-                        .then(configAWS)
-                        .then(resolve)
-                        .catch(reject)
-                    
-                } catch (error) {
-                    reject(error)
-                }
-            })
-        }
-        if(typeof config === 'string'){
-            require('colors')
-            // console.log(`Configuring using path string`)
-            this.configuration = Object.assign({},require(config));
-        }else if(typeof config === 'object'){
-            this.configuration = config;
-        }else if(config || config==null){
-            throw new Error('ConfigurationError: Could not handle configuration')
-        }
 
-        
-        
-        
-        
-        
+var HunterMessaging = class HunterMessaging {
+    constructor(config) {
+        this.checkConfiguration(config);
+        this.awsAPIs = {}
+
+        this.cachedURLs = {}
+
+        this.requestHandlers = {};
+        this.responseHandlers = {}
     }
-}
-function initLogger(self){
-    return new Promise(function(resolve,reject){
-        try {
-            require('colors')
-            if(self.configuration.log || self.configuration.log.debug){ console.log('Initializing logger'.gray)}
-            class Logger{
-                constructor(tag,color,active){
-                    this.tag = tag;
-                    this.color = color;
-                    this.active = active;
-                    this.log = function(message){
-                        if(this.active){
-                            var dt = new Date();
-                            var D = dt.getDate(),
-                                M = dt.getMonth(),
-                                Y = dt.getFullYear(),
-                                h = dt.getHours(),
-                                m = dt.getMinutes(),
-                                s = dt.getSeconds(),
-                                ms = dt.getMilliseconds();
-                            console.log(`[${D}/${M}/${Y} - ${h}:${m}:${s}:${ms}][${this.tag}][${self.configuration.worker}] ${message}`[this.color])
-                        }
-                    }
-                }
-            }
 
-            var logger = {}
-            logger.debug =  new Logger('debug','magenta'  , self.configuration.log && (typeof self.configuration.log.debug !== 'undefined')? self.configuration.log.debug :false);
-            logger.info  =  new Logger('info','green'     , self.configuration.log && (typeof self.configuration.log.info  !== 'undefined')? self.configuration.log.info  :true);
-            logger.warn  =  new Logger('warn','orange'    , self.configuration.log && (typeof self.configuration.log.warn  !== 'undefined')? self.configuration.log.warn  :true);
-            logger.err   =  new Logger('error','red'      , self.configuration.log && (typeof self.configuration.log.err   !== 'undefined')? self.configuration.log.err   :true);
-            logger.err.log = function(error){
-                if(this.active){
-                    var dt = new Date();
-                    var D = dt.getDate(),
-                        M = dt.getMonth(),
-                        Y = dt.getFullYear(),
-                        h = dt.getHours(),
-                        m = dt.getMinutes(),
-                        s = dt.getSeconds(),
-                        ms = dt.getMilliseconds();
-                    console.log(`[${D}/${M}/${Y} - ${h}:${m}:${s}:${ms}][${this.tag}][${self.configuration.worker}] ${error.message} ${error.stack}`[this.color])
+    checkConfiguration(config) {
+        if(config == null)
+            throw new Error("No configuration was set.");
+
+        if(typeof(config) === "string") {
+            config = require(config);
+        }
+
+        if(config.app == null)
+            throw new Error("No App Identifier was set.");
+        
+        if(config.stage == null) {
+            if(process.env.current_stage == null)
+                throw new Error("Application Stage not set.");
+            else {
+                config.stage = process.env.current_stage;
+                logger.info("Stage set to " + config.stage)
+            }
+        }
+
+        if(config.worker == null) {
+            var workerId = os.hostname() + "_" + process.pid;
+            logger.warn("Worker Id not set. Assuming " + workerId);
+            config.worker = workerId;
+        }
+
+        if(config.aws == null) {
+            logger.warn("AWS Credentials not set. Environment set?");
+        } else {
+            if(config.aws.sqs == null) {
+                logger.warn("SQS configuration not set.");
+            }
+            if(config.aws.sns == null) {
+                logger.warn("SNS configuration not set.");
+            }
+        }
+        this.config = config;
+        if(this.config.aws != null && this.config.aws.api != null) {
+            AWS.config.update(this.config.aws.api)
+        }
+    }
+
+    initializeSQS() {
+        if(this.config.aws && this.config.aws.sqs ) {
+            logger.info('Initializing sqs using custom configuration...')
+            this.awsAPIs.sqs = new AWS.SQS(this.config.aws.sqs);
+        } else {
+            logger.info('Initializing sqs using defaults')
+            this.awsAPIs.sqs = new AWS.SQS({ apiVersion: '2012-11-05' });
+        }
+
+        // Define o nome da fila
+        this.queueName = this.config.app + "_" + this.config.stage;
+
+        var self = this;
+        return new Promise(function(resolve,reject){
+            self.awsAPIs.sqs.listQueues({QueueNamePrefix: self.queueName}, function(err, data) {
+                if(err) {
+                    reject(err);
+                    return;
                 }
                 
-            }
-            self._logger = logger;
-            resolve(self);
-        } catch (error) {
-            reject(error)
+                if(data.QueueUrls) {
+                    self.queueURL = data.QueueUrls[0]; // Não devem existir mais de uma fila
+                    logger.info("Found queue for " + self.config.app + ": " + self.queueURL);
+                    resolve()
+                }
+                else if (self.config.aws.sqs.create) {
+                    logger.info("Creating queue...");
+                    var params = {
+                        QueueName: self.queueName
+                    };
+                    self.awsAPIs.sqs.createQueue(params, function(err, data) {
+                        if (err) reject(err); 
+                        else {
+                            logger.info(`Queue created: ${JSON.stringify(data.QueueUrl)}`)
+                            self.queueURL = data.QueueUrl;
+                            resolve()
+                        }           
+                    });
+                }
+                else {
+                    logger.error("Queue not found...");
+                    reject("Queue " + self.queueName + " not found...");
+                }
+            })
+        })
+    }
+
+    onRequest(service, handler) {
+        this.requestHandlers[service] = handler;
+    }
+
+    onResponse(service, handler) {
+        this.responseHandlers[service] = handler;
+    }
+
+    async sendRequest(destApp, service, body, payload) {
+        var destQueue = this.cachedURLs[destApp];
+        if(destQueue == null) {
+            var targetQueue = destApp + "_" + this.config.stage; // sempre usa o mesmo stage do app
+            destQueue = await findQueue(this.awsAPIs.sqs, targetQueue);
         }
+
+        if(destQueue == null) {
+            reject("No queue found for app: " + destApp);
+            return;
+        }
+
+        var data = {
+            type: "request",
+            sentBy: {
+                application: this.config.app,
+                instance: this.config.worker,
+                callback: this.queueURL,
+            },
+            service: service,
+            body: body,
+            payload: payload,
+        }
+
+        // Retira o payload caso não tenha conteúdo algum
+        if((payload && payload==="") || (payload && payload == null)) delete data.payload;                      
+
+        await sendToQueue(this.awsAPIs.sqs, destQueue, data);
+    }
+
+    processMessage(message) {
+        return new Promise((resolve, reject) => {
+            var messageBody = JSON.parse(message.Body);
+            var handlerMap = null;
+
+            var messageWrapper = clone(messageBody);
+            messageWrapper._apiRef = this;
+
+            // Identifica o mapa de handler que será utilizado
+            if(messageBody.type === "request") {
+                handlerMap = this.requestHandlers;
+                messageWrapper.reply = createReplyMethod(this, messageBody, message.ReceiptHandle);
+            }
+            else if(messageBody.type === "response") {
+                handlerMap = this.responseHandlers;
+                messageWrapper.done = createDoneMethod(this, message.ReceiptHandle);
+            }
+            else {
+                // Mensagem recebida tem um tipo incompatível.
+                logger.error("Invalid message received. Type should be request|response");
+                logger.info("Message will be removed.");
+                // TODO: deveria eliminar a mensagem
+                
+                // resolve(); // não lança exception porque outras mensagens devem ser processadas.
+                return null;
+            }
+
+            messageWrapper.dismiss = createDismissMethod(this, message.ReceiptHandle);
+
+            // Procura o handler
+            var handlerFnc = handlerMap[messageBody.service];
+            if(handlerFnc == null) {
+                logger.error("No handler found for service " + messageBody.service);
+                logger.error("Message will be kept in queue");
+                // resolve();
+                return;
+            }
+
+            // Cria uma promisse para o handler
+            try {
+                console.log("Running handler...")
+                var promise = handlerFnc(messageWrapper);
+                if(promise != null && promise.then != null) { // Retornou uma promise, então executa
+                    promise
+                        .then(resolve())
+                        .catch(error => {throw error});
+                }
+                console.log("Handler is done!");
+            } catch(error) {
+                reject(error);
+            }
+        });
+    }
+
+    async readMessages() {
+        console.log("Getting messages for " + this.config.app)
+        var messages = await getMessages(this.awsAPIs.sqs, this.queueURL);
+        if(messages == null) {
+            console.log("___ SEM MENSAGENS PARA ", this.config.app)
+            // Não tem mensagens, cai fora...
+            return 0;
+        }
+
+        for(var i=0; i < messages.length; i++) {
+            await this.processMessage(messages[i]);
+        }   
+        console.log(this.config.app, "is done Reading !!!");
+    }
+}
+
+function findQueue(sqsAPI, queueName) {
+    return new Promise((resolve, reject) => {
+        sqsAPI.listQueues({QueueNamePrefix: queueName}, function(err, data) {
+            if(err)
+                reject(err);
+            else if(data.QueueUrls == null || data.QueueUrls.length == 0)
+                reject("No queue found for " + queueName);
+            else
+                resolve(data.QueueUrls[0]);
+        });
     })
 }
 
+function sendToQueue(sqsAPI, queueUrl, data) {
+    console.log("Sending....")
+    return new Promise((resolve, reject) => {
+        var send_params = {
+            MessageBody: JSON.stringify(data),
+            QueueUrl: queueUrl,
+            DelaySeconds: 0
+        };
 
-function setUpAPI(self){
-    return new Promise(function(resolve,reject){
-        try {
-            self._logger.debug.log('Initializing API')
-            // self.service = {}
-            self.startup = new Date();
-            self.configuration.stage = process.env.stage || self.configuration.stage; //sobrescreve stage com a variavel de ambiente stage
-            if(!self.configuration.stage){
-                reject(self._errors.StageNotSet())
-            } else if(!self.configuration.worker) {
-                reject(self._errors.AppWithoutId())
-            }else{
-                self.onRequest = onRequest;
-                self.onResponse = onResponse;
-                self.readMessages = readMessages;
-                self.removeListeners = removeListeners;
-                self.sendRequest = sendRequest
-                resolve(self)            
+        sqsAPI.sendMessage(send_params, function(err, data) {
+            if (err) {
+                reject(err)
+            } else {
+                resolve(data)
+                console.log("Message was sent! to " + queueUrl);
             }
+        });
+    });
+}
+
+function getMessages(sqsAPI, queueUrl) {
+    return new Promise((resolve, reject) => {
+        sqsAPI.receiveMessage({QueueUrl:queueUrl}, function(err, data) {
+            if (err) reject(err)
+            else resolve(data.Messages)
+        });
+    })
+}
+
+function removeFromQueue(sqsAPI, queueUrl, receipt){
+    return new Promise((resolve,reject) => {
+        sqsAPI.deleteMessage({QueueUrl: queueUrl, ReceiptHandle: receipt }, 
+            function(err, data) {
+                if (err) reject(err);
+                else resolve();
+        });
+    })
+}
+
+function createReplyMethod(apiRef, messageBody, receipt) {
+    return function(answer) {
+        return new Promise((res, rej) => {
+            console.log("Replying...");
+            var replyMsg = {
+                type: "response",
+                sentBy: {
+                    application: apiRef.config.app,
+                    instance: apiRef.config.worker,
+                },
+                service: messageBody.service,
+                body: answer,
+                payload: messageBody.payload,
+                originalMessage: messageBody
+            }
+            if(replyMsg.payload == null || replyMsg.payload === "") delete replyMsg.payload;
+
+            console.log("Enviando pra fila...")
+            sendToQueue(apiRef.awsAPIs.sqs, messageBody.sentBy.callback, replyMsg)
+                .then(_ => {
+                    console.log("Mensagem enviada, eliminando da fila...")
+                    return removeFromQueue(apiRef.awsAPIs.sqs, apiRef.queueURL, receipt)
+                })
+                .then(_ => {
+                    console.log("Terminou de enviar e removeu a mensagem da fila...");
+                    res();
+                });
+        });
+    }
+}
+
+function createDoneMethod(apiRef, receipt) {
+    return function() {
+        return new Promise((res, rej) => {
+            removeFromQueue(apiRef.awsAPIs.sqs, apiRef.queueURL, receipt)
+                .then(res());
+        });
+    }
+}
+
+function createDismissMethod(apiRef, receipt) {
+    return function() {
+        return new Promise((res, rej) => {
+            // Na verdade, não faz nada com a mensagem, só vai ficar "travada" até expirar o tempo de processamento..
+            // Dá pra mudar o timeout pra liberar ela de imediato mas não é obrigatório
+            res();
+        });
+    }
+}
+
+// function setUpAPI(self){
+//     return new Promise(function(resolve,reject){
+//         try {
+//             self._logger.debug.log('Initializing API')
+//             // self.service = {}
+//             self.startup = new Date();
+//             self.configuration.stage = process.env.stage || self.configuration.stage; //sobrescreve stage com a variavel de ambiente stage
+//             if(!self.configuration.stage){
+//                 reject(self._errors.StageNotSet())
+//             } else if(!self.configuration.worker) {
+//                 reject(self._errors.AppWithoutId())
+//             }else{
+//                 self.onRequest = onRequest;
+//                 self.onResponse = onResponse;
+//                 self.readMessages = readMessages;
+//                 self.removeListeners = removeListeners;
+//                 self.sendRequest = sendRequest
+//                 resolve(self)            
+//             }
             
-        } catch (error) {
-            reject(error)
-        }
-    })
-}
+//         } catch (error) {
+//             reject(error)
+//         }
+//     })
+// }
 
-function configureErrors(self){
-    return new Promise(function(resolve,reject){
-        try {
-            self._logger.debug.log('Initializing errors')
-            self._errors = {};
-            self._errors.AppNotRegistered = _=> new Error('AppNotRegisteredError: App must be registered with an valid identifier.')
-            self._errors.sqsNotInitialized = _=> new Error('SqsNotInitializedError: call \'api.initialize()\' first.')
-            self._errors.WrongAppId = _=> new Error('WrongAppIdError: Incorrect number of queues, App identification is not valid for this API.')
-            self._errors.AppWithoutId = _=> new Error('AppWithoutIdError: App must be registered with an identifier.')
-            self._errors.ServiceNotFound = _=> new Error('ServiceNotFoundError: Sending Request to an Inexistent app')
-            self._errors.StageNotSet = _=> new Error('StageNotSetError: Api stage not configured. Make sure configuration json property stage property is set.')
-            resolve(self)            
-        } catch (error) {
-            reject(error)
-        }
-    })
-}
+// function configureErrors(self){
+//     return new Promise(function(resolve,reject){
+//         try {
+//             self._logger.debug.log('Initializing errors')
+//             self._errors = {};
+//             self._errors.AppNotRegistered = _=> new Error('AppNotRegisteredError: App must be registered with an valid identifier.')
+//             self._errors.sqsNotInitialized = _=> new Error('SqsNotInitializedError: call \'api.initialize()\' first.')
+//             self._errors.WrongAppId = _=> new Error('WrongAppIdError: Incorrect number of queues, App identification is not valid for this API.')
+//             self._errors.AppWithoutId = _=> new Error('AppWithoutIdError: App must be registered with an identifier.')
+//             self._errors.ServiceNotFound = _=> new Error('ServiceNotFoundError: Sending Request to an Inexistent app')
+//             self._errors.StageNotSet = _=> new Error('StageNotSetError: Api stage not configured. Make sure configuration json property stage property is set.')
+//             resolve(self)            
+//         } catch (error) {
+//             reject(error)
+//         }
+//     })
+// }
 
 function configAWS(self){
     return new Promise((resolve,reject)=>{
@@ -191,52 +416,7 @@ function initializeSNS(self){
     
 }
 
-function initializeSQS(self){
-    return new Promise(function(resolve,reject){
-        try {
-            if(self.configuration.aws &&
-                self.configuration.aws.sqs ){
-                    self._logger.debug.log('Initializing sqs using custom configuration')
-                    self.aws.sqs.api = new self.AWS.SQS(self.configuration.aws.sqs);
-                    
-            }else{
-                self._logger.debug.log('Initializing sqs using default configuration')
-                self.aws.sqs.api = new self.AWS.SQS({ apiVersion: '2012-11-05' });
-            }
-            updateQueuesUrlsFromServer(self)
-                .then(createQueuesIfDontExist)
-                .then(getRegisteredSQSAttibutes)
-                .then(resolve)
-                .catch(reject)            
-        } catch (error) {
-            reject(error)
-        }
-        
 
-    })
-    
-}
-
-function updateQueuesUrlsFromServer(self){
-    return new Promise(function(resolve,reject){
-        self._logger.debug.log('Initializing Queues')
-        
-        self.aws.sqs.api.listQueues({}, function(err, data) {
-            if(err) reject(err);
-            else {
-                
-                if(data.QueueUrls){
-                    self.aws.sqs.urls = data.QueueUrls;
-                    self._logger.debug.log(`Listing service URLs`)
-                    self.aws.sqs.urls.forEach(url => {
-                        self._logger.debug.log(`url: ${url};`)
-                    });
-                }
-                resolve(self)
-            }
-        })
-    })
-}
 
 // function getSQSarns(self){
 //     return new Promise(function(resolve,reject){
@@ -320,26 +500,6 @@ function createQueuesIfDontExist(self){
                 
 }
 
-function createQueue(self,name){
-    return new Promise(function(resolve,reject){
-        try {
-            self._logger.debug.log(`Creating queue: ${name}`)
-            var params = {
-                QueueName: name, /* required */                            
-            };
-            self.aws.sqs.api.createQueue(params, function(err, data) {
-                if (err) reject(err); 
-                else {
-                    self._logger.debug.log(`Queue created: ${JSON.stringify(data.QueueUrl)}`)
-                    self.aws.sqs.urls.push(data.QueueUrl)
-                    resolve(self)
-                }           
-            });
-        } catch (error) {
-            reject(error)
-        }
-    })
-}
 
 
 
@@ -641,3 +801,4 @@ function getQueueAttributes(self,url){
 }
 
 
+module.exports = HunterMessaging;
