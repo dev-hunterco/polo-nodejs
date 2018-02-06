@@ -11,7 +11,7 @@ const LOAD_LOCALSTACK = process.env.LOAD_LOCALSTACK != "false";
 
 
 describe('Messaging Tests',function() {  
-    // Localstack initialization
+    // // Localstack initialization
     before(function() {
         console.log("### CHAMOU BEFORE....");
 
@@ -36,27 +36,6 @@ describe('Messaging Tests',function() {
             return new Promise((res, rej) => res());
     });
     
-    // Faz o purge das filas para evitar contaminação entre os cenários
-    beforeEach(function(done) { 
-        const waitingTime = 1000;
-        this.timeout(60000); 
-
-        while(!localstackUtils.isRunning()) {
-            logger.info("Waiting to localstack to be ready.");
-            sleep.nsleep(waitingTime);
-        }
-        localstackUtils.purgeSQS()
-            .then(_ => {
-                logger.debug("Queues purged.");
-                done()
-            })
-            .catch(err => {
-                logger.warn("Error cleaning queues:", err.message);
-                done();
-            });
-    });
-    // afterEach (done => localstackUtils.stop().then(done()))
-
     describe('Test Configurations', function() {
         it('No Configuration', function(done) {
             try {
@@ -164,6 +143,26 @@ describe('Messaging Tests',function() {
         before(() => app1.initializeQueue());
         before(() => app2.initializeQueue());
 
+        // Faz o purge das filas para evitar contaminação entre os cenários
+        beforeEach(function() { 
+            const waitingTime = 1000;
+            this.timeout(60000); 
+
+            while(!localstackUtils.isRunning()) {
+                logger.info("Waiting to localstack to be ready.");
+                sleep.nsleep(waitingTime);
+            }
+            return localstackUtils.purgeSQS()
+                // .then(_ => {
+                //     logger.debug("Queues purged.");
+                //     done()
+                // })
+                // .catch(err => {
+                //     logger.warn("Error cleaning queues:", err.message);
+                //     done();
+                // });
+        });
+        
         it('Send and receive message', function(done) {
             this.timeout(30000);
 

@@ -87,9 +87,12 @@ function purgeSQS() {
     var sqsAPI = new AWS.SQS(conf);
 
     return new Promise((resolve, reject) => {
+        logger.info("Purging queues...");
         sqsAPI.listQueues({}, function(err, data) {
             if(err) {
-                reject(err);
+                // reject(err);
+                logger.warn("Error listing queues", err.message);
+                resolve();
                 return;
             }
             if(!data || !data.QueueUrls) {
@@ -97,18 +100,17 @@ function purgeSQS() {
                 return;
             }
 
-            resolve(Promise.all(data.QueueUrls.map(u => {
-                    return {
-                        QueueUrl: u
-                    }
-                })
-                .map(p => new Promise((res, rej) => {
-                    sqsAPI.purgeQueue(p, function(err2, data2) {
-                        logger.debug("Queue purged...", p.QueueUrl, err);
-                        if (err2) rej(err2);
-                        else res();
-                      });
-                }))
+            resolve(
+                Promise.all(
+                    data.QueueUrls
+                    .map(u => new Promise((res, rej) => {
+                        console.log("** CLEANING QUEUE:", u)
+                        sqsAPI.purgeQueue({ QueueUrl: u }, function(err2, data2) {
+                            logger.debug("Queue purged...", u, err);
+                            if (err2) rej(err2);
+                            else res();
+                        });
+                    }))
             ));
         });
     });
