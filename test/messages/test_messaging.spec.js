@@ -155,19 +155,11 @@ describe('Messaging Tests',function() {
             const waitingTime = 1000;
             this.timeout(60000); 
 
-            while(!localstackUtils.isRunning()) {
+            while(LOAD_LOCALSTACK && !localstackUtils.isRunning()) {
                 logger.info("Waiting to localstack to be ready.");
-                sleep.nsleep(waitingTime);
+                sleep.msleep(waitingTime);
             }
             return localstackUtils.purgeSQS()
-                // .then(_ => {
-                //     logger.debug("Queues purged.");
-                //     done()
-                // })
-                // .catch(err => {
-                //     logger.warn("Error cleaning queues:", err.message);
-                //     done();
-                // });
         });
         
         it('Send and receive message', function(done) {

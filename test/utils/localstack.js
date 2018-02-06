@@ -51,7 +51,7 @@ function start(opts) {
             })            
         }
         else
-            loggers.warn("______ LOCALSTACK IS ALREADY RUNNING.... ________");
+            logger.warn("______ LOCALSTACK IS ALREADY RUNNING.... ________");
     });
 }
 
@@ -62,7 +62,7 @@ function stop() {
             instance.kill('SIGINT');     
         }
         else {
-            loggers.warn("___________ LOCALSTACK ALREADY DEAD !!! _______________");
+            logger.warn("___________ LOCALSTACK ALREADY DEAD !!! _______________");
         }
         resolve();
     });
