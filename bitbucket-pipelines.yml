@@ -15,8 +15,6 @@ pipelines:
           - npm run test
         services:
           - localstack
-        environment:
-          LOAD_LOCALSTACK: false
   # custom:
   #   deploy-runtime:
   #     - step:
