@@ -23,7 +23,7 @@ function start(opts) {
         // Aguarda pela linha "Ready."
         instance.stdout.on('data', (data) => {
             data.toString().split('\n').filter(l => l.length > 0).forEach(line => {
-                loggers.info(`stdout: ${line}`);
+                logger.info(`stdout: ${line}`);
                 if(line === 'Ready.') {
                     logger.info("Localstack is ready !");
                     resolve()

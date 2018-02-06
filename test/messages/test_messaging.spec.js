@@ -7,23 +7,31 @@ const HunterMessaging = require('../../src/main.js').messages;
 const localstackUtils = require('../utils/localstack')
 const path = require('path')
 const DEFAULT_CONF = path.resolve(__dirname, '../hapi.test.peoplesearch.worker.json')
+const LOAD_LOCALSTACK = process.env.LOAD_LOCALSTACK != "false";
 
 // Localstack
 var localstack;
 
-describe('Messaging Tests',function(){  
-    // // Localstack initialization
-    // before(function() {
-    //     var newEnv = clone(process.env);
-    //     newEnv.SERVICES = "sqs"
+describe('Messaging Tests',function() {  
+    // Localstack initialization
+    before(function() {
+        var newEnv = clone(process.env);
+        newEnv.SERVICES = "sqs"
 
-    //     this.timeout(60000); 
-    //     return localstackUtils.start({env: newEnv});
-    // });
-    // after(function() {
-    //     this.timeout(60000); 
-    //     return localstackUtils.stop()
-    // });
+        this.timeout(60000); 
+
+        if(LOAD_LOCALSTACK)
+            return localstackUtils.start({env: newEnv});
+        else
+            return new Promise((res, rej) => res());
+    });
+    after(function() {
+        this.timeout(60000); 
+        if(LOAD_LOCALSTACK)
+            return localstackUtils.stop()
+        else
+            return new Promise((res, rej) => res());
+    });
     
     // Deveria fazer o purge das filas para evitar contaminação entre os cenários
     beforeEach(function() { this.timeout(30000); return localstackUtils.purgeSQS()});

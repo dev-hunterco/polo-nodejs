@@ -3,6 +3,7 @@ pipelines:
   default:
     - step:
         script:
+          - pip install localstack
           - npm install
           - npm run test
   # custom:
