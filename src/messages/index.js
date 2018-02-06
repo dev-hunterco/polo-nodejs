@@ -2,8 +2,6 @@ const logger = require('winston')
 const AWS = require('aws-sdk')
 const clone = require('clone')
 const os = require('os')
-var Promise = require('promise')
-
 
 var HunterMessaging = class HunterMessaging {
     constructor(config) {

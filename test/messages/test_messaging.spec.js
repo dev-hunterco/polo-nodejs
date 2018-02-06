@@ -1,5 +1,4 @@
 require('should')
-const sleep = require('sleep');
 const logger = require('winston')
 const clone = require('clone');
 const HunterMessaging = require('../../src/main.js').messages;
