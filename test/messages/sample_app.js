@@ -12,13 +12,14 @@ const SampleApp = class SampleApp {
         this.requests = [];
         this.responses = [];
     }
-    async initializeQueue() {
+    initializeQueue() {
         this.messagingAPI = new HunterMessaging(this.config);
-        await this.messagingAPI.initializeSQS();
-        logger.info("Queue initialized for ", this.name);
-
-        this.messagingAPI.onRequest ("greetings", this.onRequestArrived.bind(this));
-        this.messagingAPI.onResponse("greetings", this.onResponseArrived.bind(this));
+        return this.messagingAPI.initializeSQS()
+        .then(_ => {
+                logger.info("Queue initialized for ", this.name);
+                this.messagingAPI.onRequest ("greetings", this.onRequestArrived.bind(this));
+                this.messagingAPI.onResponse("greetings", this.onResponseArrived.bind(this));
+            });
     }
 
     onRequestArrived(message) {
