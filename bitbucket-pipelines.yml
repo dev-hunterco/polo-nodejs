@@ -1,12 +1,19 @@
 image: thorgate/python3.4-node6
+
+definitions:
+  services:
+    localstack:
+      image: localstack/localstack
+
 pipelines:
   default:
     - step:
         script:
-          - pip install localstack
+          # - pip install localstack
           - npm install
-          - ping localhost -t 5
           - npm run test
+        services:
+          - localstack
   # custom:
   #   deploy-runtime:
   #     - step:
