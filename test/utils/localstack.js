@@ -18,46 +18,57 @@ var isInstanceRunning = false;
 
 function start(opts) {
     return new Promise((resolve, reject) => {
-        logger.info("Iniciando o Localstack...");
-        instance = spawn('localstack', ['start'], opts);
+        if(!isInstanceRunning) {
+            logger.info("Iniciando o Localstack...");
+            instance = spawn('localstack', ['start'], opts);
 
-        // Aguarda pela linha "Ready."
-        instance.stdout.on('data', (data) => {
-            data.toString().split('\n').filter(l => l.length > 0).forEach(line => {
-                logger.info(`stdout: ${line}`);
-                if(line === 'Ready.') {
-                    logger.info("Localstack is ready !");
-                    isInstanceRunning = true;
-                    resolve()
-                }
-            })
-        });
+            // Aguarda pela linha "Ready."
+            instance.stdout.on('data', (data) => {
+                data.toString().split('\n').filter(l => l.length > 0).forEach(line => {
+                    logger.info(`stdout: ${line}`);
+                    if(line === 'Ready.') {
+                        logger.info("Localstack is ready !");
+                        isInstanceRunning = true;
+                        resolve()
+                    }
+                })
+            });
 
-        // Saidas na stream de erro
-        instance.stderr.on('data', (data) => {
-            // data.toString().split('\n').forEach(l => logger.warn(l))
-        });
-        instance.on('close', (code) => {
-            isInstanceRunning = false;
-            logger.error(`Localstack has being terminated with code: ${code}`);
-        });
+            // Saidas na stream de erro
+            instance.stderr.on('data', (data) => {
+                // data.toString().split('\n').forEach(l => logger.warn(l))
+            });
+            instance.on('close', (code) => {
+                isInstanceRunning = false;
+                logger.error(`Localstack has terminated with code: ${code}`);
+            });
 
-        // Quantos os testes acabarem, termina o processo também.
-        process.on('beforeExit',function(code){
-            stop().then(_ => isInstanceRunning = false);
-        })            
+            // Quantos os testes acabarem, termina o processo também.
+            process.on('beforeExit',function(code){
+                // stop().then(_ => 
+                    isInstanceRunning = false
+                // );
+            })            
+        }
+        else
+            console.log("______ LOCALSTACK IS ALREADY RUNNING.... ________");
     });
 }
 
 function stop() {
     return new Promise((resolve, reject) => {
-        logger.info("Finalizando Localstack...");
-
-        instance.kill('SIGINT');     
-        instance.on('close', function(){
-            isInstanceRunning = false;
-            resolve();
-        })       
+        if(isInstanceRunning) {
+            console.log("------------ TO FINALIZANDO -----------------");
+            console.trace();
+            
+            logger.info("Finalizando Localstack...");
+            instance.kill('SIGINT');     
+        }
+        else {
+            console.log("___________ ALREADY DEAD !!! _______________");
+            console.trace();
+        }
+        resolve();
     });
 }
 

@@ -13,6 +13,8 @@ const LOAD_LOCALSTACK = process.env.LOAD_LOCALSTACK != "false";
 describe('Messaging Tests',function() {  
     // Localstack initialization
     before(function() {
+        console.log("### CHAMOU BEFORE....");
+
         var newEnv = clone(process.env);
         newEnv.SERVICES = "sqs"
 
@@ -24,6 +26,8 @@ describe('Messaging Tests',function() {
             return new Promise((res, rej) => res());
     });
     after(function() {
+        console.log("### CHAMOU AFTER....");
+        
         this.timeout(60000); 
 
         if(LOAD_LOCALSTACK)
