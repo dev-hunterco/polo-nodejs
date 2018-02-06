@@ -4,7 +4,8 @@ definitions:
   services:
     localstack:
       image: localstack/localstack
-
+      environment:
+        SERVICES: sqs,sns
 pipelines:
   default:
     - step:

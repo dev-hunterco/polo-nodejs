@@ -11,30 +11,30 @@ const LOAD_LOCALSTACK = process.env.LOAD_LOCALSTACK != "false";
 
 
 describe('Messaging Tests',function() {  
-    // // Localstack initialization
-    before(function() {
-        console.log("### CHAMOU BEFORE....");
+    // // // Localstack initialization
+    // before(function() {
+    //     console.log("### CHAMOU BEFORE....");
 
-        var newEnv = clone(process.env);
-        newEnv.SERVICES = "sqs"
+    //     var newEnv = clone(process.env);
+    //     newEnv.SERVICES = "sqs"
 
-        this.timeout(60000); 
+    //     this.timeout(60000); 
 
-        if(LOAD_LOCALSTACK)
-            return localstackUtils.start({env: newEnv});
-        else
-            return new Promise((res, rej) => res());
-    });
-    after(function() {
-        console.log("### CHAMOU AFTER....");
+    //     if(LOAD_LOCALSTACK)
+    //         return localstackUtils.start({env: newEnv});
+    //     else
+    //         return new Promise((res, rej) => res());
+    // });
+    // after(function() {
+    //     console.log("### CHAMOU AFTER....");
         
-        this.timeout(60000); 
+    //     this.timeout(60000); 
 
-        if(LOAD_LOCALSTACK)
-            return localstackUtils.stop()
-        else
-            return new Promise((res, rej) => res());
-    });
+    //     if(LOAD_LOCALSTACK)
+    //         return localstackUtils.stop()
+    //     else
+    //         return new Promise((res, rej) => res());
+    // });
     
     describe('Test Configurations', function() {
         it('No Configuration', function(done) {
