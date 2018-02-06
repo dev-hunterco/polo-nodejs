@@ -10,4 +10,4 @@ npm run test
 
 # APIs Disponíveis
 
-* Messages: APIs utilizada para troca de mensagens entre os aplicativos.
+* [Messages](./docs/messages.md) : APIs utilizada para troca de mensagens entre os aplicativos.
