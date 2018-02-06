@@ -1,0 +1,15 @@
+image: node:6.9.4
+pipelines:
+  default:
+    - step:
+        script:
+          - npm install
+          - npm run test
+  # custom:
+  #   deploy-runtime:
+  #     - step:
+  #         script:
+  #         - ./build-runtime.sh
+  #         - scp -i ~/.ssh/config gm-runtime.zip ubuntu@52.27.128.130:~/tmp 
+
+

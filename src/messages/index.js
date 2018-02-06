@@ -113,103 +113,104 @@ var HunterMessaging = class HunterMessaging {
         this.responseHandlers[service] = handler;
     }
 
-    async sendRequest(destApp, service, body, payload) {
-        var destQueue = this.cachedURLs[destApp];
-        if(destQueue == null) {
-            var targetQueue = destApp + "_" + this.config.stage; // sempre usa o mesmo stage do app
-            destQueue = await findQueue(this.awsAPIs.sqs, targetQueue);
-        }
+    sendRequest(destApp, service, body, payload) {
+        // Cria um chain de promises para processar a mensagem
+        var self = this;
 
-        if(destQueue == null) {
-            reject("No queue found for app: " + destApp);
-            return;
-        }
-
-        var data = {
-            type: "request",
-            sentBy: {
-                application: this.config.app,
-                instance: this.config.worker,
-                callback: this.queueURL,
-            },
-            service: service,
-            body: body,
-            payload: payload,
-        }
-
-        // Retira o payload caso não tenha conteúdo algum
-        if((payload && payload==="") || (payload && payload == null)) delete data.payload;                      
-
-        await sendToQueue(this.awsAPIs.sqs, destQueue, data);
-    }
-
-    processMessage(message) {
+        // Determina a fila
         return new Promise((resolve, reject) => {
-            var messageBody = JSON.parse(message.Body);
-            var handlerMap = null;
-
-            var messageWrapper = clone(messageBody);
-            messageWrapper._apiRef = this;
-
-            // Identifica o mapa de handler que será utilizado
-            if(messageBody.type === "request") {
-                handlerMap = this.requestHandlers;
-                messageWrapper.reply = createReplyMethod(this, messageBody, message.ReceiptHandle);
+            var destQueue = this.cachedURLs[destApp];
+            if(destQueue == null) {
+                var targetQueue = destApp + "_" + this.config.stage; // sempre usa o mesmo stage do app
+                resolve(findQueue(this.awsAPIs.sqs, targetQueue));
             }
-            else if(messageBody.type === "response") {
-                handlerMap = this.responseHandlers;
-                messageWrapper.done = createDoneMethod(this, message.ReceiptHandle);
-            }
+            else resolve(new Promise((rs, rj) => rs(destQueue)));
+        })
+        .then(destQueue => { 
+            if(destQueue == null)
+                throw new Error("No queue found for app: " + destApp);
             else {
-                // Mensagem recebida tem um tipo incompatível.
-                logger.error("Invalid message received. Type should be request|response");
-                logger.info("Message will be removed.");
-                // TODO: deveria eliminar a mensagem
-                
-                // resolve(); // não lança exception porque outras mensagens devem ser processadas.
-                return null;
-            }
-
-            messageWrapper.dismiss = createDismissMethod(this, message.ReceiptHandle);
-
-            // Procura o handler
-            var handlerFnc = handlerMap[messageBody.service];
-            if(handlerFnc == null) {
-                logger.error("No handler found for service " + messageBody.service);
-                logger.error("Message will be kept in queue");
-                // resolve();
-                return;
-            }
-
-            // Cria uma promisse para o handler
-            try {
-                console.log("Running handler...")
-                var promise = handlerFnc(messageWrapper);
-                if(promise != null && promise.then != null) { // Retornou uma promise, então executa
-                    promise
-                        .then(resolve())
-                        .catch(error => {throw error});
+                var data = {
+                    type: "request",
+                    sentBy: {
+                        application: self.config.app,
+                        instance: self.config.worker,
+                        callback: self.queueURL,
+                    },
+                    service: service,
+                    body: body,
+                    payload: payload,
                 }
-                console.log("Handler is done!");
-            } catch(error) {
-                reject(error);
+            
+                // Retira o payload caso não tenha conteúdo algum
+                if((payload && payload==="") || (payload && payload == null)) delete data.payload;
+
+                return sendToQueue(self.awsAPIs.sqs, destQueue, data);
+                // resolve(sendToQueue(self.awsAPIs.sqs, destQueue, data));
             }
         });
     }
 
-    async readMessages() {
-        console.log("Getting messages for " + this.config.app)
-        var messages = await getMessages(this.awsAPIs.sqs, this.queueURL);
-        if(messages == null) {
-            console.log("___ SEM MENSAGENS PARA ", this.config.app)
-            // Não tem mensagens, cai fora...
-            return 0;
+    processMessage(message) {
+        var messageBody = JSON.parse(message.Body);
+        var handlerMap = null;
+
+        var messageWrapper = clone(messageBody);
+        messageWrapper._apiRef = this;
+
+        // Identifica o mapa de handler que será utilizado e atualiza os métodos injetados
+        // de acordo com o tipo de mensagem
+        if(messageBody.type === "request") {
+            handlerMap = this.requestHandlers;
+            messageWrapper.reply = createReplyMethod(this, messageBody, message.ReceiptHandle);
+        }
+        else if(messageBody.type === "response") {
+            handlerMap = this.responseHandlers;
+            messageWrapper.done = createDoneMethod(this, message.ReceiptHandle);
+        }
+        else {
+            // Mensagem recebida tem um tipo incompatível.
+            logger.error("Invalid message received. Type should be request|response");
+            logger.info("Message will be removed.");
+            // TODO: deveria eliminar a mensagem
+            
+            // resolve(); // não lança exception porque outras mensagens devem ser processadas.
+            return new Promise((resolve, reject) => {
+                reject("Incompatible message type");
+            })
+        }
+        messageWrapper.dismiss = createDismissMethod(this, message.ReceiptHandle);
+
+        // Procura o handler
+        var handlerFnc = handlerMap[messageBody.service];
+        if(handlerFnc == null) {
+            logger.error("No handler found for service " + messageBody.service);
+            logger.error("Message will be kept in queue");
+            return new Promise((resolve, reject) => {
+                resolve();
+            })
         }
 
-        for(var i=0; i < messages.length; i++) {
-            await this.processMessage(messages[i]);
-        }   
-        console.log(this.config.app, "is done Reading !!!");
+        var handlerPromise = handlerFnc(messageWrapper);
+        // Ops, não retornou uma promise... rejeita
+        if(handlerPromise.then == null) {
+            return new Promise((res, rej) => {
+                rej(new Error("Handler for " + messageBody.service + " must return a promise."));
+            })
+        }
+        return handlerPromise;
+    }
+
+    readMessages() {
+        var numOfMessages = 0;
+        return getMessages(this.awsAPIs.sqs, this.queueURL)
+            .then(messages => {
+                if(messages == null)
+                    messages = [];
+                numOfMessages = messages.length;
+                return Promise.all(messages.map(m => this.processMessage(m)))
+            })
+            .then(_ => numOfMessages);
     }
 }
 
@@ -227,20 +228,17 @@ function findQueue(sqsAPI, queueName) {
 }
 
 function sendToQueue(sqsAPI, queueUrl, data) {
-    console.log("Sending....")
+    var send_params = {
+        MessageBody: JSON.stringify(data),
+        QueueUrl: queueUrl,
+        DelaySeconds: 0
+    };
     return new Promise((resolve, reject) => {
-        var send_params = {
-            MessageBody: JSON.stringify(data),
-            QueueUrl: queueUrl,
-            DelaySeconds: 0
-        };
-
         sqsAPI.sendMessage(send_params, function(err, data) {
             if (err) {
                 reject(err)
             } else {
                 resolve(data)
-                console.log("Message was sent! to " + queueUrl);
             }
         });
     });
@@ -260,48 +258,36 @@ function removeFromQueue(sqsAPI, queueUrl, receipt){
         sqsAPI.deleteMessage({QueueUrl: queueUrl, ReceiptHandle: receipt }, 
             function(err, data) {
                 if (err) reject(err);
-                else resolve();
+                else {
+                    resolve();
+                }
         });
     })
 }
 
 function createReplyMethod(apiRef, messageBody, receipt) {
     return function(answer) {
-        return new Promise((res, rej) => {
-            console.log("Replying...");
-            var replyMsg = {
-                type: "response",
-                sentBy: {
-                    application: apiRef.config.app,
-                    instance: apiRef.config.worker,
-                },
-                service: messageBody.service,
-                body: answer,
-                payload: messageBody.payload,
-                originalMessage: messageBody
-            }
-            if(replyMsg.payload == null || replyMsg.payload === "") delete replyMsg.payload;
+        var replyMsg = {
+            type: "response",
+            sentBy: {
+                application: apiRef.config.app,
+                instance: apiRef.config.worker,
+            },
+            service: messageBody.service,
+            body: answer,
+            payload: messageBody.payload,
+            originalMessage: messageBody
+        }
+        if(replyMsg.payload == null || replyMsg.payload === "") delete replyMsg.payload;
 
-            console.log("Enviando pra fila...")
-            sendToQueue(apiRef.awsAPIs.sqs, messageBody.sentBy.callback, replyMsg)
-                .then(_ => {
-                    console.log("Mensagem enviada, eliminando da fila...")
-                    return removeFromQueue(apiRef.awsAPIs.sqs, apiRef.queueURL, receipt)
-                })
-                .then(_ => {
-                    console.log("Terminou de enviar e removeu a mensagem da fila...");
-                    res();
-                });
-        });
+        return sendToQueue(apiRef.awsAPIs.sqs, messageBody.sentBy.callback, replyMsg)
+                .then(removeFromQueue(apiRef.awsAPIs.sqs, apiRef.queueURL, receipt))
     }
 }
 
 function createDoneMethod(apiRef, receipt) {
     return function() {
-        return new Promise((res, rej) => {
-            removeFromQueue(apiRef.awsAPIs.sqs, apiRef.queueURL, receipt)
-                .then(res());
-        });
+        return removeFromQueue(apiRef.awsAPIs.sqs, apiRef.queueURL, receipt)
     }
 }
 
@@ -315,490 +301,449 @@ function createDismissMethod(apiRef, receipt) {
     }
 }
 
-// function setUpAPI(self){
+
+///--------------------------------- pra baixo deve ser tudo eliminado
+
+// function configAWS(self){
+//     return new Promise((resolve,reject)=>{
+//         try {
+//             self._logger.debug.log('Initializing aws')
+        
+//             self.AWS = require('aws-sdk');
+//             // self.AWS.config.loadFromPath(self.configuration.aws);
+//             self.AWS.config = new self.AWS.Config(self.configuration.aws.api);
+//             initializeAWSServices(self).then(resolve).catch(reject)
+//         } catch (error) {
+//             reject(error)
+//         }
+        
+//     })
+// }
+
+
+// function initializeAWSServices(self){
+//     return new Promise(function(resolve,reject){
+//         self.aws = {
+//             sqs:{
+//                 api:null,
+//                 urls:[],
+//                 queue:{}
+//             },
+//             sns:{
+//                 api:null
+//             }
+//         }
+
+//         initializeSQS(self)
+//             .then(initializeSNS)
+//             .then(resolve)
+//             .catch(reject);
+//     })
+// }
+
+// function initializeSNS(self){
 //     return new Promise(function(resolve,reject){
 //         try {
-//             self._logger.debug.log('Initializing API')
-//             // self.service = {}
-//             self.startup = new Date();
-//             self.configuration.stage = process.env.stage || self.configuration.stage; //sobrescreve stage com a variavel de ambiente stage
-//             if(!self.configuration.stage){
-//                 reject(self._errors.StageNotSet())
-//             } else if(!self.configuration.worker) {
-//                 reject(self._errors.AppWithoutId())
+//             if( self.configuration.aws &&
+//                 self.configuration.aws.sns && 
+//                 self.configuration.aws.sns.endpoint ){
+//                     self._logger.debug.log('Inititalizing sns with custom configuration');
+//                     self.aws.sns.api = new self.AWS.SNS(self.configuration.aws.sns);
 //             }else{
-//                 self.onRequest = onRequest;
-//                 self.onResponse = onResponse;
-//                 self.readMessages = readMessages;
-//                 self.removeListeners = removeListeners;
-//                 self.sendRequest = sendRequest
-//                 resolve(self)            
+//                 self._logger.debug.log('Inititalizing sns with default configuration');
+//                 self.aws.sns.api = new self.AWS.SNS({ apiVersion: '2010-03-31' });
+//             }
+//             resolve(self)
+//         } catch (error) {
+//             reject(error)
+//         }
+//     })
+    
+// }
+
+
+
+// // function getSQSarns(self){
+// //     return new Promise(function(resolve,reject){
+// //         try {
+// //             self._logger.debug.log('Initializing Queues')
+// //             var params = {
+// //                 QueueNamePrefix: self.service.name
+// //             };
+// //             self.aws.sqs.api.listQueues(params, function(err, data) {
+// //                 if (err) {
+// //                     reject(err)
+// //                 } else {
+// //                     if(!data.QueueUrls) {
+// //                         if(self.configuration.aws.sqs.create){
+// //                             createQueues(self)
+// //                                 .then(resolve)
+// //                                 .catch(reject);
+// //                         }else{
+// //                             reject(self._errors.AppNotRegistered())
+// //                         }
+// //                     }else{
+// //                         furls = data.QueueUrls.filter(url=>url.indexOf(self.service.name)>=0)
+// //                         if(furls.length==0){
+// //                             if(!self.configuration.aws.sqs.create){
+// //                                 reject(self._errors.AppNotRegistered());
+// //                             }else{
+// //                                 createQueues(self).then(resolve).catch(reject);
+// //                             }
+// //                         }
+// //                         else if(furls.length!=2){
+// //                             self._logger.debug.log(furls)
+// //                             if(!self.configuration.aws.sqs.create){
+// //                                 reject(self._errors.WrongAppId())
+// //                             }else{ 
+// //                                 Promise.all(furls.map(url => deleteQueue(self,url)))
+// //                                     .then(createQueues)
+// //                                     .then(resolve)
+// //                                     .catch(reject)
+    
+// //                             }
+// //                         }
+// //                     }       
+// //                 }
+// //             });
+// //         } catch (error) {
+// //             reject(error)
+// //         }
+// //     })
+// // }
+
+// function createQueuesIfDontExist(self){
+//     self._logger.debug.log('Creating queues for this app if not exists.')
+//     return new Promise((resolve,reject)=>{
+//         if(self.configuration.aws.sqs.create){
+//             Promise.all(
+//                 [
+//                     self.configuration.app + "_" + self.configuration.stage
+//                 ]
+//                 .filter(function(url){
+//                     if(self.aws.sqs.urls) 
+//                         return self.aws.sqs.urls.filter(surl=>{
+//                             return new RegExp(url).test(surl)
+//                         }).length==0;
+//                     else true;
+//                 })
+//                 .map(function(name){
+//                     return createQueue(self,name);
+//                 })).then(_=>resolve(self)).catch(reject)
+//         }else{
+//             if(self.aws.sqs.urls
+//                 .filter(url=>
+//                     new RegExp(`${self.configuration.app}_${self.configuration.stage}`).test(url))
+//                 .length==1){
+//                 resolve(self);
+//             }else{
+//                 reject(self._errors.AppNotRegistered());
+//             }
+
+//         }
+//     })
+                
+// }
+
+
+
+
+// function getRegisteredSQSAttibutes(self){
+//     return new Promise(function(resolve,reject){
+//         try {
+//             self._logger.debug.log('Getting all queues attributes')
+//             Promise.all(self.aws.sqs.urls.map(url => getQueueAttributes(self,url)))
+//                 .then(_=>resolve(self)).catch(reject);
+//         } catch (error) {
+//             reject(error)
+//         }
+        
+//     })
+// }
+
+
+// function readMessages(){
+//     var self = this;
+//     return new Promise(function(resolve,reject){
+//         self._logger.debug.log('Read Messages')
+//         Promise.all(self.aws.sqs.urls.filter(
+//                 url=>new RegExp(`${self.configuration.app}_${self.configuration.stage}`).test(url)
+//             ).map(url=>{
+//                 return consumeSQS(self,url)
+//             })).then(_=>{
+//                 resolve(self)
+//             }).catch(reject);
+//         })
+
+            
+// }
+
+
+// function consumeSQS(self,url) {
+//     return new Promise(function(resolve,reject){
+//         self._logger.debug.log('Consume queue: '+url)
+        
+//         params = Object.assign({QueueUrl:url}, self.configuration.aws.sqs.consume);
+//         self.aws.sqs.api.receiveMessage(params, function(err, data) {
+//             if (err) {
+//                 self._logger.err.log(err);
+//             } else {
+//                 if (data.Messages && data.Messages.length > 0) {
+//                     self._logger.debug.log(`Received ${data.Messages.length} message(s) from queue ${url}.`);
+//                     Promise.all(data.Messages.map(m => {
+//                         m.data = JSON.parse(m.Body);
+//                         var handlerFnc = (m.data.type === 'request')?handleRequest:handleResponse;
+//                         if(/request|response/i.test(m.data.type)){
+//                             return new Promise(function(resolve,reject){
+//                                 handlerFnc(self,m).then(message=>{
+//                                     /**
+//                                      * Caso handlerFnc retorne uma mensagem enviar a mensagem processada.
+//                                      * Caso contrário ele só deleta a mensagem processada.
+//                                      */
+//                                     if(message){ 
+//                                         sendResponse(self,message).then(p =>{
+//                                             deleteMessage(self,url,message).then(resolve).catch(reject)    
+//                                         }).catch(reject);
+//                                     }else{
+//                                         deleteMessage(self,url,m).then(resolve).catch(reject)        
+//                                     }
+//                                 }).catch(err=>{
+//                                     self._logger.error.log("Process handler function error: ",err)
+                                    
+//                                     // setMessageTimeout(self,message,0).then(p =>{resolve(message);rresolve(); }).catch(p=>{reject(p);rreject(p)});
+
+//                                     resolve()
+//                                 });
+//                             }) 
+//                         }else{
+//                             self._logger.err.log(new Error(`UnknownDataType: message data.type should be "request" or "response", received: ${data.type}`));
+//                             return false;
+//                         }
+//                     })).then(_=>resolve(self)).catch(reject);
+                    
+//                 }else{
+//                     self._logger.debug.log(`No message received from queue ${url}.`);
+//                     resolve(self)
+//                 }
+
+//             }
+//         })
+//     })
+// }
+
+// function deleteMessage(self,queue,message){
+
+//     return new Promise(function(resolve,reject){
+//         self._logger.debug.log(`Deleting message: ${message.ReceipHandle}`)
+//         self.aws.sqs.api.deleteMessage({
+//             QueueUrl:queue , 
+//             ReceiptHandle:message.ReceiptHandle }, function(err, data) {
+//                 if (err) reject(err);
+//                 else { 
+//                     self._logger.info.log(`Message deleted: ${JSON.stringify(message,undefined,3)}`)
+//                     resolve()
+//                 }
+//         });
+//     })
+// }
+
+// function handleResponse(self,message){
+//     return new Promise(function(resolve,reject){
+//         try {
+//             self._logger.debug.log(`Response => ${message.data.service}`);
+//             self._handler.response[message.data.service](message)
+//             resolve()
+//         } catch (error) {
+//             console.error(error);
+//             resolve()
+//         }
+//     })
+// }
+
+// function handleRequest(self,message){
+//     return new Promise(function(resolve,reject){
+//         var timeOut = setTimeout(() => {
+//             if(!message._data){ reject(new Error(`HandlerTimeOutError: Handler method does not resolve provided message with message.reply or message.replyError. Trigger timeout after ${self.configuration.aws.sqs.consume.VisibilityTimeout} seconds.`)); }
+//         }, self.configuration.aws.sqs.consume.VisibilityTimeout*1000);
+
+//         message.reply = function(data){ //trocar para replyDone
+//             clearTimeout(timeOut)
+//             message._data = data;
+//             resolve(message)
+//         }
+
+//         message.replyError = function(err){//trocar para replyError
+//             clearTimeout(timeOut)
+//             message._data = {error:{message:err.message}};
+//             resolve(message)
+//         }
+
+        
+
+//         self._logger.debug.log(`Request => ${message.data.service}`);
+//         try {
+//             self._handler.request[message.data.service](message);        
+//         } catch (error) {
+//             if(/.*is not a function$/.test(error.message)) { 
+//                 message.replyError(new Error('UnknowMethodError: Service does not have required \'unknown\' service.')).then(resolve).catch(reject);
+//             }else reject(error);
+//         }
+
+//     })
+// }
+// function removeListeners(event){
+//     if(this._handler.request)  delete this._handler.request[event];
+//     if(this._handler.response) delete this._handler.response[event];
+// } 
+
+
+// function setMessageTimeout(self,queue,message,time){
+//     return new Promise(function(resolve,reject){
+
+//         var params = {
+//             QueueUrl: queue, /* required */
+//             ReceiptHandle: message.ReceipHandle, /* required */
+//             VisibilityTimeout: 0 /* required */
+//           };
+//         self.aws.sqs.api.changeMessageVisibility(params, function(err, data) {
+//             if (err) console.log(err, err.stack); // an error occurred
+//             else     console.log(data);           // successful response
+//         });
+//     })
+// }
+
+// function sendResponse(self,message){
+//     return new Promise(function(resolve,reject){
+//         try{
+//             self._logger.info.log('Sending response to '+message.data.callback)
+//             var response_service = message.data.callback
+            
+//             if(!response_service) reject(new Error('Can\'t Respond Message: Provided message does not have response service'))
+//             if(!message._data) reject(new Error('UnprocessedMessageError: Make shure that message was resolved'))
+//             var data = {
+//                 response:message._data,
+//                 payload:message.data.payload,
+//                 service:message.data.service,
+//                 type:"response"
 //             }
             
-//         } catch (error) {
-//             reject(error)
-//         }
-//     })
-// }
-
-// function configureErrors(self){
-//     return new Promise(function(resolve,reject){
-//         try {
-//             self._logger.debug.log('Initializing errors')
-//             self._errors = {};
-//             self._errors.AppNotRegistered = _=> new Error('AppNotRegisteredError: App must be registered with an valid identifier.')
-//             self._errors.sqsNotInitialized = _=> new Error('SqsNotInitializedError: call \'api.initialize()\' first.')
-//             self._errors.WrongAppId = _=> new Error('WrongAppIdError: Incorrect number of queues, App identification is not valid for this API.')
-//             self._errors.AppWithoutId = _=> new Error('AppWithoutIdError: App must be registered with an identifier.')
-//             self._errors.ServiceNotFound = _=> new Error('ServiceNotFoundError: Sending Request to an Inexistent app')
-//             self._errors.StageNotSet = _=> new Error('StageNotSetError: Api stage not configured. Make sure configuration json property stage property is set.')
-//             resolve(self)            
-//         } catch (error) {
-//             reject(error)
-//         }
-//     })
-// }
-
-function configAWS(self){
-    return new Promise((resolve,reject)=>{
-        try {
-            self._logger.debug.log('Initializing aws')
-        
-            self.AWS = require('aws-sdk');
-            // self.AWS.config.loadFromPath(self.configuration.aws);
-            self.AWS.config = new self.AWS.Config(self.configuration.aws.api);
-            initializeAWSServices(self).then(resolve).catch(reject)
-        } catch (error) {
-            reject(error)
-        }
-        
-    })
-}
-
-
-function initializeAWSServices(self){
-    return new Promise(function(resolve,reject){
-        self.aws = {
-            sqs:{
-                api:null,
-                urls:[],
-                queue:{}
-            },
-            sns:{
-                api:null
-            }
-        }
-
-        initializeSQS(self)
-            .then(initializeSNS)
-            .then(resolve)
-            .catch(reject);
-    })
-}
-
-function initializeSNS(self){
-    return new Promise(function(resolve,reject){
-        try {
-            if( self.configuration.aws &&
-                self.configuration.aws.sns && 
-                self.configuration.aws.sns.endpoint ){
-                    self._logger.debug.log('Inititalizing sns with custom configuration');
-                    self.aws.sns.api = new self.AWS.SNS(self.configuration.aws.sns);
-            }else{
-                self._logger.debug.log('Inititalizing sns with default configuration');
-                self.aws.sns.api = new self.AWS.SNS({ apiVersion: '2010-03-31' });
-            }
-            resolve(self)
-        } catch (error) {
-            reject(error)
-        }
-    })
-    
-}
-
-
-
-// function getSQSarns(self){
-//     return new Promise(function(resolve,reject){
-//         try {
-//             self._logger.debug.log('Initializing Queues')
-//             var params = {
-//                 QueueNamePrefix: self.service.name
+//             var send_params = {
+//                 MessageBody: JSON.stringify(data) /* required */ ,
+//                 QueueUrl: response_service /* required */ ,
+//                 DelaySeconds: 0
 //             };
-//             self.aws.sqs.api.listQueues(params, function(err, data) {
+    
+//             self.aws.sqs.api.sendMessage(send_params, function(err, data) {
 //                 if (err) {
 //                     reject(err)
 //                 } else {
-//                     if(!data.QueueUrls) {
-//                         if(self.configuration.aws.sqs.create){
-//                             createQueues(self)
-//                                 .then(resolve)
-//                                 .catch(reject);
-//                         }else{
-//                             reject(self._errors.AppNotRegistered())
-//                         }
-//                     }else{
-//                         furls = data.QueueUrls.filter(url=>url.indexOf(self.service.name)>=0)
-//                         if(furls.length==0){
-//                             if(!self.configuration.aws.sqs.create){
-//                                 reject(self._errors.AppNotRegistered());
-//                             }else{
-//                                 createQueues(self).then(resolve).catch(reject);
-//                             }
-//                         }
-//                         else if(furls.length!=2){
-//                             self._logger.debug.log(furls)
-//                             if(!self.configuration.aws.sqs.create){
-//                                 reject(self._errors.WrongAppId())
-//                             }else{ 
-//                                 Promise.all(furls.map(url => deleteQueue(self,url)))
-//                                     .then(createQueues)
-//                                     .then(resolve)
-//                                     .catch(reject)
-    
-//                             }
-//                         }
-//                     }       
+//                     self._logger.debug.log('Response sent')        
+//                     resolve(message)   
 //                 }
 //             });
-//         } catch (error) {
-//             reject(error)
+
+//         }catch(err){
+//             reject(err)
 //         }
 //     })
+// };
+
+// function sendRequest(to,service,body,payload){
+//     var self = this;
+//     return new Promise(function(resolve,reject){
+//         if(self.aws.sqs.api){
+//             updateQueuesUrlsFromServer(self)
+//                 .then(getRegisteredSQSAttibutes)
+//                 .then(function(){
+//                     try {   
+//                         var request_service = self.aws.sqs.urls.filter(url=>new RegExp(`${to}_${self.configuration.stage}`).test(url))[0]
+//                         var response_service = self.aws.sqs.urls.filter(url=>new RegExp(`${self.configuration.app}_${self.configuration.stage}$`).test(url))[0]
+//                         if(!request_service) throw self._errors.ServiceNotFound() //new Error('ServiceNotFoundError: Sending Request to an Inexistent app')
+//                         self._logger.info.log(`to: ${to}, service: ${service}, payload: ${payload}, url:${request_service}`)
+//                         // var attrs = []; for( att in self.aws.sqs.queue[request_service]){attrs.push(att)}
+//                         // self.aws.sqs.queue
+//                         var data = {
+//                             body:body,
+//                             service:service,
+//                             callback:response_service,
+//                             payload:payload,
+//                             type:"request"
+//                         }
+
+//                         if((payload && payload==="") || (payload && payload == null)) delete data.payload;                      
+//                         var send_params = {
+//                             MessageBody: JSON.stringify(data) /* required */ ,
+//                             QueueUrl: request_service /* required */ ,
+//                             DelaySeconds: 0
+//                         };
+//                         self.aws.sqs.api.sendMessage(send_params, function(err, data) {
+//                             if (err) {
+//                                 reject(err)
+//                             } else {
+//                                 self._logger.debug.log('message sent')
+//                                 resolve(data)   
+//                             }
+//                         });
+//                     } catch (error) {
+//                         reject(error)
+//                     }
+//                 }).catch(reject)
+            
+//         }else{
+//             reject(self._errors.sqsNotInitialized())
+//         }
+        
+        
+
+//     })
+// };
+
+// function onRequest(event,callback){
+//     if(typeof event === 'string' && typeof callback === 'function'){
+//         if(!this._handler) this._handler = {}
+//         if(!this._handler.request) this._handler.request = {};
+        
+//         this._handler.request[event] = callback;
+//         this._logger.debug.log(`registered onRequest callback on: ${event}.`)        
+//     }else{
+//         throw new Error('WrongParameterType: onEventRegister must receive event:string and callback:function respectively.')
+//     }
 // }
 
-function createQueuesIfDontExist(self){
-    self._logger.debug.log('Creating queues for this app if not exists.')
-    return new Promise((resolve,reject)=>{
-        if(self.configuration.aws.sqs.create){
-            Promise.all(
-                [
-                    self.configuration.app + "_" + self.configuration.stage
-                ]
-                .filter(function(url){
-                    if(self.aws.sqs.urls) 
-                        return self.aws.sqs.urls.filter(surl=>{
-                            return new RegExp(url).test(surl)
-                        }).length==0;
-                    else true;
-                })
-                .map(function(name){
-                    return createQueue(self,name);
-                })).then(_=>resolve(self)).catch(reject)
-        }else{
-            if(self.aws.sqs.urls
-                .filter(url=>
-                    new RegExp(`${self.configuration.app}_${self.configuration.stage}`).test(url))
-                .length==1){
-                resolve(self);
-            }else{
-                reject(self._errors.AppNotRegistered());
-            }
+// function onResponse(event,callback){
+//     if(typeof event === 'string' && typeof callback === 'function'){
+//         if(!this._handler) this._handler = {}
+//         if(!this._handler.response) this._handler.response = {};
+        
+//         this._handler.response[event] = callback;
+//         this._logger.debug.log(`registered onResponse callback on: ${event}.`)              
+//     }else{
+//         throw new Error('IncorectParameters: Parameters must be event:string and callback:function.') 
+//     }        
+// }
 
-        }
-    })
+// function getQueueAttributes(self,url){
+//     return new Promise(function(resolve,reject){
+//         self._logger.debug.log(`getting attributes for ${url}`)
+//         var params = {
+//                 QueueUrl: url,
+//                 AttributeNames: [ "All" ]
+//             };
+//             self.aws.sqs.api.getQueueAttributes(params, function(err, data) {
+//                 if (err) reject(err) 
+//                 else{
+//                     try {
+//                         self._logger.debug.log(`got attributes for: ${url}`)
+//                         self.aws.sqs.queue[url] = data.Attributes;
+//                         resolve(self)
+//                     } catch (error) {
+//                         reject(error)
+//                     }
+//                 }  
                 
-}
-
-
-
-
-function getRegisteredSQSAttibutes(self){
-    return new Promise(function(resolve,reject){
-        try {
-            self._logger.debug.log('Getting all queues attributes')
-            Promise.all(self.aws.sqs.urls.map(url => getQueueAttributes(self,url)))
-                .then(_=>resolve(self)).catch(reject);
-        } catch (error) {
-            reject(error)
-        }
-        
-    })
-}
-
-
-function readMessages(){
-    var self = this;
-    return new Promise(function(resolve,reject){
-        self._logger.debug.log('Read Messages')
-        Promise.all(self.aws.sqs.urls.filter(
-                url=>new RegExp(`${self.configuration.app}_${self.configuration.stage}`).test(url)
-            ).map(url=>{
-                return consumeSQS(self,url)
-            })).then(_=>{
-                resolve(self)
-            }).catch(reject);
-        })
-
-            
-}
-
-
-function consumeSQS(self,url) {
-    return new Promise(function(resolve,reject){
-        self._logger.debug.log('Consume queue: '+url)
-        
-        params = Object.assign({QueueUrl:url}, self.configuration.aws.sqs.consume);
-        self.aws.sqs.api.receiveMessage(params, function(err, data) {
-            if (err) {
-                self._logger.err.log(err);
-            } else {
-                if (data.Messages && data.Messages.length > 0) {
-                    self._logger.debug.log(`Received ${data.Messages.length} message(s) from queue ${url}.`);
-                    Promise.all(data.Messages.map(m => {
-                        m.data = JSON.parse(m.Body);
-                        var handlerFnc = (m.data.type === 'request')?handleRequest:handleResponse;
-                        if(/request|response/i.test(m.data.type)){
-                            return new Promise(function(resolve,reject){
-                                handlerFnc(self,m).then(message=>{
-                                    /**
-                                     * Caso handlerFnc retorne uma mensagem enviar a mensagem processada.
-                                     * Caso contrário ele só deleta a mensagem processada.
-                                     */
-                                    if(message){ 
-                                        sendResponse(self,message).then(p =>{
-                                            deleteMessage(self,url,message).then(resolve).catch(reject)    
-                                        }).catch(reject);
-                                    }else{
-                                        deleteMessage(self,url,m).then(resolve).catch(reject)        
-                                    }
-                                }).catch(err=>{
-                                    self._logger.error.log("Process handler function error: ",err)
-                                    
-                                    // setMessageTimeout(self,message,0).then(p =>{resolve(message);rresolve(); }).catch(p=>{reject(p);rreject(p)});
-
-                                    resolve()
-                                });
-                            }) 
-                        }else{
-                            self._logger.err.log(new Error(`UnknownDataType: message data.type should be "request" or "response", received: ${data.type}`));
-                            return false;
-                        }
-                    })).then(_=>resolve(self)).catch(reject);
-                    
-                }else{
-                    self._logger.debug.log(`No message received from queue ${url}.`);
-                    resolve(self)
-                }
-
-            }
-        })
-    })
-}
-
-function deleteMessage(self,queue,message){
-
-    return new Promise(function(resolve,reject){
-        self._logger.debug.log(`Deleting message: ${message.ReceipHandle}`)
-        self.aws.sqs.api.deleteMessage({
-            QueueUrl:queue , 
-            ReceiptHandle:message.ReceiptHandle }, function(err, data) {
-                if (err) reject(err);
-                else { 
-                    self._logger.info.log(`Message deleted: ${JSON.stringify(message,undefined,3)}`)
-                    resolve()
-                }
-        });
-    })
-}
-
-function handleResponse(self,message){
-    return new Promise(function(resolve,reject){
-        try {
-            self._logger.debug.log(`Response => ${message.data.service}`);
-            self._handler.response[message.data.service](message)
-            resolve()
-        } catch (error) {
-            console.error(error);
-            resolve()
-        }
-    })
-}
-
-function handleRequest(self,message){
-    return new Promise(function(resolve,reject){
-        var timeOut = setTimeout(() => {
-            if(!message._data){ reject(new Error(`HandlerTimeOutError: Handler method does not resolve provided message with message.reply or message.replyError. Trigger timeout after ${self.configuration.aws.sqs.consume.VisibilityTimeout} seconds.`)); }
-        }, self.configuration.aws.sqs.consume.VisibilityTimeout*1000);
-
-        message.reply = function(data){ //trocar para replyDone
-            clearTimeout(timeOut)
-            message._data = data;
-            resolve(message)
-        }
-
-        message.replyError = function(err){//trocar para replyError
-            clearTimeout(timeOut)
-            message._data = {error:{message:err.message}};
-            resolve(message)
-        }
-
-        
-
-        self._logger.debug.log(`Request => ${message.data.service}`);
-        try {
-            self._handler.request[message.data.service](message);        
-        } catch (error) {
-            if(/.*is not a function$/.test(error.message)) { 
-                message.replyError(new Error('UnknowMethodError: Service does not have required \'unknown\' service.')).then(resolve).catch(reject);
-            }else reject(error);
-        }
-
-    })
-}
-function removeListeners(event){
-    if(this._handler.request)  delete this._handler.request[event];
-    if(this._handler.response) delete this._handler.response[event];
-} 
-
-
-function setMessageTimeout(self,queue,message,time){
-    return new Promise(function(resolve,reject){
-
-        var params = {
-            QueueUrl: queue, /* required */
-            ReceiptHandle: message.ReceipHandle, /* required */
-            VisibilityTimeout: 0 /* required */
-          };
-        self.aws.sqs.api.changeMessageVisibility(params, function(err, data) {
-            if (err) console.log(err, err.stack); // an error occurred
-            else     console.log(data);           // successful response
-        });
-    })
-}
-
-function sendResponse(self,message){
-    return new Promise(function(resolve,reject){
-        try{
-            self._logger.info.log('Sending response to '+message.data.callback)
-            var response_service = message.data.callback
-            
-            if(!response_service) reject(new Error('Can\'t Respond Message: Provided message does not have response service'))
-            if(!message._data) reject(new Error('UnprocessedMessageError: Make shure that message was resolved'))
-            var data = {
-                response:message._data,
-                payload:message.data.payload,
-                service:message.data.service,
-                type:"response"
-            }
-            
-            var send_params = {
-                MessageBody: JSON.stringify(data) /* required */ ,
-                QueueUrl: response_service /* required */ ,
-                DelaySeconds: 0
-            };
-    
-            self.aws.sqs.api.sendMessage(send_params, function(err, data) {
-                if (err) {
-                    reject(err)
-                } else {
-                    self._logger.debug.log('Response sent')        
-                    resolve(message)   
-                }
-            });
-
-        }catch(err){
-            reject(err)
-        }
-    })
-};
-
-function sendRequest(to,service,body,payload){
-    var self = this;
-    return new Promise(function(resolve,reject){
-        if(self.aws.sqs.api){
-            updateQueuesUrlsFromServer(self)
-                .then(getRegisteredSQSAttibutes)
-                .then(function(){
-                    try {   
-                        var request_service = self.aws.sqs.urls.filter(url=>new RegExp(`${to}_${self.configuration.stage}`).test(url))[0]
-                        var response_service = self.aws.sqs.urls.filter(url=>new RegExp(`${self.configuration.app}_${self.configuration.stage}$`).test(url))[0]
-                        if(!request_service) throw self._errors.ServiceNotFound() //new Error('ServiceNotFoundError: Sending Request to an Inexistent app')
-                        self._logger.info.log(`to: ${to}, service: ${service}, payload: ${payload}, url:${request_service}`)
-                        // var attrs = []; for( att in self.aws.sqs.queue[request_service]){attrs.push(att)}
-                        // self.aws.sqs.queue
-                        var data = {
-                            body:body,
-                            service:service,
-                            callback:response_service,
-                            payload:payload,
-                            type:"request"
-                        }
-
-                        if((payload && payload==="") || (payload && payload == null)) delete data.payload;                      
-                        var send_params = {
-                            MessageBody: JSON.stringify(data) /* required */ ,
-                            QueueUrl: request_service /* required */ ,
-                            DelaySeconds: 0
-                        };
-                        self.aws.sqs.api.sendMessage(send_params, function(err, data) {
-                            if (err) {
-                                reject(err)
-                            } else {
-                                self._logger.debug.log('message sent')
-                                resolve(data)   
-                            }
-                        });
-                    } catch (error) {
-                        reject(error)
-                    }
-                }).catch(reject)
-            
-        }else{
-            reject(self._errors.sqsNotInitialized())
-        }
-        
-        
-
-    })
-};
-
-function onRequest(event,callback){
-    if(typeof event === 'string' && typeof callback === 'function'){
-        if(!this._handler) this._handler = {}
-        if(!this._handler.request) this._handler.request = {};
-        
-        this._handler.request[event] = callback;
-        this._logger.debug.log(`registered onRequest callback on: ${event}.`)        
-    }else{
-        throw new Error('WrongParameterType: onEventRegister must receive event:string and callback:function respectively.')
-    }
-}
-
-function onResponse(event,callback){
-    if(typeof event === 'string' && typeof callback === 'function'){
-        if(!this._handler) this._handler = {}
-        if(!this._handler.response) this._handler.response = {};
-        
-        this._handler.response[event] = callback;
-        this._logger.debug.log(`registered onResponse callback on: ${event}.`)              
-    }else{
-        throw new Error('IncorectParameters: Parameters must be event:string and callback:function.') 
-    }        
-}
-
-function getQueueAttributes(self,url){
-    return new Promise(function(resolve,reject){
-        self._logger.debug.log(`getting attributes for ${url}`)
-        var params = {
-                QueueUrl: url,
-                AttributeNames: [ "All" ]
-            };
-            self.aws.sqs.api.getQueueAttributes(params, function(err, data) {
-                if (err) reject(err) 
-                else{
-                    try {
-                        self._logger.debug.log(`got attributes for: ${url}`)
-                        self.aws.sqs.queue[url] = data.Attributes;
-                        resolve(self)
-                    } catch (error) {
-                        reject(error)
-                    }
-                }  
-                
-        });
-    })
-}
+//         });
+//     })
+// }
 
 
 module.exports = HunterMessaging;

@@ -21,31 +21,27 @@ const SampleApp = class SampleApp {
         this.messagingAPI.onResponse("greetings", this.onResponseArrived.bind(this));
     }
 
-    async onRequestArrived(message) {
-        logger.info("Message received by", this.name, "from", message.sentBy.application);
-        this.requests.push(message);
+    onRequestArrived(message) {
+        logger.info(this.name + " - Message received by", this.name, "from", message.sentBy.application);
 
-        await message.reply({answer: 'Nice to meet you!'});
-        logger.info("Reply sent!");
-        console.log("###");
+        this.requests.push(message);
+        return message.reply({answer: 'Nice to meet you!'})
     }
 
-    async onResponseArrived(message) {
-        logger.info("Response received by", this.name, "from", message.sentBy.application);
+    onResponseArrived(message) {
+        logger.info(this.name + " - Response received by", this.name, "from", message.sentBy.application);
 
         this.responses.push(message);
-        await message.done();
-        logger.info("Response processed");
+        return message.done();
     }
 
-    async sendGreetings(destination, payload) {
+    sendGreetings(destination, payload) {
         var message = "Hello, " + destination + "... I'm " + this.name;
-        await this.messagingAPI.sendRequest(destination, "greetings", message);
-        logger.info("Greetings sent!")
+        return this.messagingAPI.sendRequest(destination, "greetings", message);;
     }
 
-    async receiveMessages() {
-        await this.messagingAPI.readMessages();
+    receiveMessages() {
+        return this.messagingAPI.readMessages();
     }
 
 

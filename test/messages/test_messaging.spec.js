@@ -136,30 +136,51 @@ describe('Messaging Tests',function(){
         before(() => app1.initializeQueue());
         before(() => app2.initializeQueue());
 
-        it('Send and receive message', async function() {
+        it('Send and receive message', function(done) {
             this.timeout(30000);
 
-            await app1.sendGreetings("App2");
-            app1.getRequestsReceived().length.should.be.eql(0);
-            app1.getResponsesReceived().length.should.be.eql(0);
-            app2.getRequestsReceived().length.should.be.eql(0);
-            app2.getResponsesReceived().length.should.be.eql(0);
-
-            await app2.receiveMessages();
-            app1.getRequestsReceived().length.should.be.eql(0);
-            app1.getResponsesReceived().length.should.be.eql(0);
-            app2.getRequestsReceived().length.should.be.eql(1);
-            app2.getResponsesReceived().length.should.be.eql(0);
-            app2.getRequestsReceived()[0].body.should.be.eql("Hello, App2... I'm App1");
-
-            console.log("-------")
-            // app1 recebe mensagens na fila
-            await app1.receiveMessages();
-            app1.getRequestsReceived().length.should.be.eql(0);
-            app1.getResponsesReceived().length.should.be.eql(1);
-            app2.getRequestsReceived().length.should.be.eql(1);
-            app2.getResponsesReceived().length.should.be.eql(0);
-            app1.getResponsesReceived()[0].body.answer.should.be.eql("Nice to meet you!")
+            logger.info("_______________________ App1 envia p/ App2 ________________________")
+            app1.sendGreetings("App2")
+                .then(reciboEnvio => {
+                    app1.getRequestsReceived().length.should.be.eql(0);
+                    app1.getResponsesReceived().length.should.be.eql(0);
+                    app2.getRequestsReceived().length.should.be.eql(0);
+                    app2.getResponsesReceived().length.should.be.eql(0);
+                    return reciboEnvio;
+                })
+                .then(reciboEvento => {
+                    logger.info("_______________________ App2 recebe e responde _____________________")
+                    return app2.receiveMessages()
+                    console.log("### Chegou no fim com", reciboEvento)
+                })
+                .then(numOfMessages => {
+                    numOfMessages.should.be.eql(1);
+                    app1.getRequestsReceived().length.should.be.eql(0);
+                    app1.getResponsesReceived().length.should.be.eql(0);
+                    app2.getRequestsReceived().length.should.be.eql(1);
+                    app2.getResponsesReceived().length.should.be.eql(0);
+                    app2.getRequestsReceived()[0].body.should.be.eql("Hello, App2... I'm App1");
+                    return numOfMessages;
+                })
+                .then(_ => {
+                    logger.info("_______________________ App1 recebe consome _____________________")
+                    return app1.receiveMessages();
+                })
+                .then(numOfMessages => {
+                    app1.getRequestsReceived().length.should.be.eql(0);
+                    app1.getResponsesReceived().length.should.be.eql(1);
+                    app2.getRequestsReceived().length.should.be.eql(1);
+                    app2.getResponsesReceived().length.should.be.eql(0);
+                    app1.getResponsesReceived()[0].body.answer.should.be.eql("Nice to meet you!")
+                    return numOfMessages;
+                })
+                .then(numOfMessages => {
+                    numOfMessages.should.be.eql(1);
+                    done()
+                })
+                .catch(error => {
+                    done(error);
+                });
         })
 
     //     /**
