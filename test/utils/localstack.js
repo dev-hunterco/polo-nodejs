@@ -51,22 +51,18 @@ function start(opts) {
             })            
         }
         else
-            console.log("______ LOCALSTACK IS ALREADY RUNNING.... ________");
+            loggers.warn("______ LOCALSTACK IS ALREADY RUNNING.... ________");
     });
 }
 
 function stop() {
     return new Promise((resolve, reject) => {
         if(isInstanceRunning) {
-            console.log("------------ TO FINALIZANDO -----------------");
-            console.trace();
-            
             logger.info("Finalizando Localstack...");
             instance.kill('SIGINT');     
         }
         else {
-            console.log("___________ ALREADY DEAD !!! _______________");
-            console.trace();
+            loggers.warn("___________ LOCALSTACK ALREADY DEAD !!! _______________");
         }
         resolve();
     });
@@ -87,7 +83,6 @@ function purgeSQS() {
     var sqsAPI = new AWS.SQS(conf);
 
     return new Promise((resolve, reject) => {
-        logger.info("Purging queues...");
         sqsAPI.listQueues({}, function(err, data) {
             if(err) {
                 // reject(err);

@@ -11,30 +11,34 @@ const LOAD_LOCALSTACK = process.env.LOAD_LOCALSTACK != "false";
 
 
 describe('Messaging Tests',function() {  
-    // // // Localstack initialization
-    // before(function() {
-    //     console.log("### CHAMOU BEFORE....");
+    // // Localstack initialization
+    before(function() {
+        var newEnv = clone(process.env);
+        newEnv.SERVICES = "sqs"
 
-    //     var newEnv = clone(process.env);
-    //     newEnv.SERVICES = "sqs"
+        this.timeout(60000); 
 
-    //     this.timeout(60000); 
+        if(LOAD_LOCALSTACK)
+            return localstackUtils.start({env: newEnv})
+                        .then(_ => new Promise((res, rej) => {
+                            // Aguarda um tempo pro localstack estar *realmente* pronto (erro 502)
+                            console.log("Aguardando 2s para executar os testes...");
+                            setTimeout(res, 2000);
+                        }));
+        else
+            return new Promise((res, rej) => {
+                console.log("Aguardando 2s para executar os testes...");
+                setTimeout(res, 2000);
+            });
+    });
+    after(function() {
+        this.timeout(60000); 
 
-    //     if(LOAD_LOCALSTACK)
-    //         return localstackUtils.start({env: newEnv});
-    //     else
-    //         return new Promise((res, rej) => res());
-    // });
-    // after(function() {
-    //     console.log("### CHAMOU AFTER....");
-        
-    //     this.timeout(60000); 
-
-    //     if(LOAD_LOCALSTACK)
-    //         return localstackUtils.stop()
-    //     else
-    //         return new Promise((res, rej) => res());
-    // });
+        if(LOAD_LOCALSTACK)
+            return localstackUtils.stop()
+        else
+            return new Promise((res, rej) => res());
+    });
     
     describe('Test Configurations', function() {
         it('No Configuration', function(done) {
@@ -131,6 +135,9 @@ describe('Messaging Tests',function() {
                     messagingAPI.queueName.should.be.not.null()
                     messagingAPI.queueURL.should.be.not.null()
                     done()
+                })
+                .catch(error => {
+                    done(error)
                 });
         }).timeout(20000);
     });
