@@ -9,9 +9,9 @@ const SampleApp = class SampleApp {
         config.aws.sqs.create = true;
         this.config = config;
 
-        this.requests = [];
-        this.responses = [];
+        this.reset();
     }
+
     initializeQueue() {
         this.messagingAPI = new HunterMessaging(this.config);
         return this.messagingAPI.initializeSQS()
@@ -22,15 +22,30 @@ const SampleApp = class SampleApp {
             });
     }
 
-    onRequestArrived(message) {
-        logger.info(this.name + " - Message received by", this.name, "from", message.sentBy.application);
+    reset() {
+        this.requests = [];
+        this.responses = [];
+        this.wrong_responses = [];
+        this.replyEnabled = true;
+    }
 
+    setReplyEnabled(r) {
+        this.replyEnabled = r;
+    }
+
+    onRequestArrived(message) {
+        logger.debug(this.name + " - Message received by", this.name, "from", message.sentBy.application);
+
+        // Sempre registra as mensagens recebidas, mesmo quando não processa.
         this.requests.push(message);
-        return message.reply({answer: 'Nice to meet you!'})
+        if(this.replyEnabled)
+            return message.reply({answer: 'Nice to meet you!'})
+        else
+            return message.dismiss();
     }
 
     onResponseArrived(message) {
-        logger.info(this.name + " - Response received by", this.name, "from", message.sentBy.application);
+        logger.debug(this.name + " - Response received by", this.name, "from", message.sentBy.application);
 
         this.responses.push(message);
         return message.done();
@@ -45,13 +60,32 @@ const SampleApp = class SampleApp {
         return this.messagingAPI.readMessages();
     }
 
-
     getRequestsReceived() {
         return this.requests;
     }
     getResponsesReceived() {
         return this.responses;
     }
+    getWrongResponsesReceived() {
+        return this.wrong_responses;
+    }
+
+    sendWrong(destination, payload) {
+        var message = "Hello, " + destination + "... I'm " + this.name;
+        return this.messagingAPI.sendRequest(destination, "wrong_greetings", message);;
+    }
+
+    registerWrongHandler() {
+        this.messagingAPI.onResponse("wrong_greetings", this.onWrongResponseArrived.bind(this));
+    }
+
+    onWrongResponseArrived(message) {
+        logger.debug(this.name + " - WRONG Response received by", this.name, "from", message.sentBy.application);
+
+        this.wrong_responses.push(message);
+        return message.done();
+    }
+
 }
 
 module.exports = SampleApp;

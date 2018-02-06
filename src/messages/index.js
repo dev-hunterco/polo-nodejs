@@ -112,41 +112,53 @@ var HunterMessaging = class HunterMessaging {
     }
 
     sendRequest(destApp, service, body, payload) {
+        // Verifica se o aplicativo é capaz de receber respostas do serviço.
+        if(this.responseHandlers[service] == null) {
+            return new Promise((res, rej) => rej(new Error("Can't send to service " + service + " without a response handler registered.")));
+        }
+
         // Cria um chain de promises para processar a mensagem
         var self = this;
+        var promise = null;
+        var destQueue = this.cachedURLs[destApp];
+        if(destQueue == null) {
+            var targetQueue = destApp + "_" + this.config.stage; // sempre usa o mesmo stage do app
+            promise = findQueue(this.awsAPIs.sqs, targetQueue)
+                        .then(queue => {
+                            return queue
+                        })
+                        .catch(_ => {
+                            return null;
+                        })
+        }
+        else 
+            promise = new Promise((rs, rj) => rs(destQueue));
 
-        // Determina a fila
-        return new Promise((resolve, reject) => {
-            var destQueue = this.cachedURLs[destApp];
-            if(destQueue == null) {
-                var targetQueue = destApp + "_" + this.config.stage; // sempre usa o mesmo stage do app
-                resolve(findQueue(this.awsAPIs.sqs, targetQueue));
-            }
-            else resolve(new Promise((rs, rj) => rs(destQueue)));
-        })
-        .then(destQueue => { 
-            if(destQueue == null)
-                throw new Error("No queue found for app: " + destApp);
-            else {
-                var data = {
-                    type: "request",
-                    sentBy: {
-                        application: self.config.app,
-                        instance: self.config.worker,
-                        callback: self.queueURL,
-                    },
-                    service: service,
-                    body: body,
-                    payload: payload,
+        return promise
+            .then(destQueue => { 
+                if(destQueue == null) {
+                    throw new Error("No queue found for app: " + destApp);
                 }
-            
-                // Retira o payload caso não tenha conteúdo algum
-                if((payload && payload==="") || (payload && payload == null)) delete data.payload;
+                else {
+                    var data = {
+                        type: "request",
+                        sentBy: {
+                            application: self.config.app,
+                            instance: self.config.worker,
+                            callback: self.queueURL,
+                        },
+                        service: service,
+                        body: body,
+                        payload: payload,
+                    }
+                
+                    // Retira o payload caso não tenha conteúdo algum
+                    if((payload && payload==="") || (payload && payload == null)) delete data.payload;
 
-                return sendToQueue(self.awsAPIs.sqs, destQueue, data);
-                // resolve(sendToQueue(self.awsAPIs.sqs, destQueue, data));
-            }
-        });
+                    return sendToQueue(self.awsAPIs.sqs, destQueue, data);
+                    // resolve(sendToQueue(self.awsAPIs.sqs, destQueue, data));
+                }
+            });
     }
 
     processMessage(message) {
@@ -182,11 +194,17 @@ var HunterMessaging = class HunterMessaging {
         // Procura o handler
         var handlerFnc = handlerMap[messageBody.service];
         if(handlerFnc == null) {
-            logger.error("No handler found for service " + messageBody.service);
-            logger.error("Message will be kept in queue");
-            return new Promise((resolve, reject) => {
-                resolve();
-            })
+            if(messageBody.type === "request")
+                // Se não tem handler registrado é porque o serviço não é suportado.
+                return replyError(this, messageBody, message.ReceiptHandle, "Service '" + messageBody.service + "' not supported.");
+            else {
+                // O serviço originalmente enviou uma mensagem errada.
+                // Como no retorno da mensagem não tem muito o que fazer apenas loga
+                // TODO: dá pra pensar em ter um handler genérico para erros.. avaliar no futuro
+                logger.error("An invalid request was sent to " + messageBody.sentBy.application + " by this application (" + this.config.app + ")");
+                logger.error("or there's no response handler for service " + messageBody.service + " (although it was able to send this message at some time).");
+                return new Promise((res, rej) => {rej();})
+            }
         }
 
         var handlerPromise = handlerFnc(messageWrapper);
@@ -273,6 +291,7 @@ function createReplyMethod(apiRef, messageBody, receipt) {
             },
             service: messageBody.service,
             body: answer,
+            success: true,
             payload: messageBody.payload,
             originalMessage: messageBody
         }
@@ -281,6 +300,24 @@ function createReplyMethod(apiRef, messageBody, receipt) {
         return sendToQueue(apiRef.awsAPIs.sqs, messageBody.sentBy.callback, replyMsg)
                 .then(removeFromQueue(apiRef.awsAPIs.sqs, apiRef.queueURL, receipt))
     }
+}
+
+function replyError(apiRef, messageBody, receipt, errorInfo) {
+    var replyMsg = {
+        type: "response",
+        sentBy: {
+            application: apiRef.config.app,
+            instance: apiRef.config.worker,
+        },
+        service: messageBody.service,
+        body: {error: errorInfo},
+        success: false,
+        payload: messageBody.payload,
+        originalMessage: messageBody
+    }
+    if(replyMsg.payload == null || replyMsg.payload === "") delete replyMsg.payload;
+    return sendToQueue(apiRef.awsAPIs.sqs, messageBody.sentBy.callback, replyMsg)
+            .then(removeFromQueue(apiRef.awsAPIs.sqs, apiRef.queueURL, receipt))
 }
 
 function createDoneMethod(apiRef, receipt) {

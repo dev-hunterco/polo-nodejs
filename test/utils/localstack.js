@@ -99,9 +99,7 @@ function purgeSQS() {
                 Promise.all(
                     data.QueueUrls
                     .map(u => new Promise((res, rej) => {
-                        console.log("** CLEANING QUEUE:", u)
                         sqsAPI.purgeQueue({ QueueUrl: u }, function(err2, data2) {
-                            logger.debug("Queue purged...", u, err);
                             if (err2) rej(err2);
                             else res();
                         });

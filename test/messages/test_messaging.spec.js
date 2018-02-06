@@ -9,7 +9,6 @@ const sleep = require('sleep')
 const DEFAULT_CONF = path.resolve(__dirname, '../hapi.test.peoplesearch.worker.json')
 const LOAD_LOCALSTACK = process.env.LOAD_LOCALSTACK != "false";
 
-
 describe('Messaging Tests',function() {  
     // // Localstack initialization
     before(function() {
@@ -150,6 +149,12 @@ describe('Messaging Tests',function() {
         before(() => app1.initializeQueue());
         before(() => app2.initializeQueue());
 
+        beforeEach((done) => {
+            app1.reset();
+            app2.reset()
+            done()
+        });
+
         // Faz o purge das filas para evitar contaminação entre os cenários
         beforeEach(function() { 
             const waitingTime = 1000;
@@ -165,7 +170,7 @@ describe('Messaging Tests',function() {
         it('Send and receive message', function(done) {
             this.timeout(30000);
 
-            logger.info("_______________________ App1 envia p/ App2 ________________________")
+            logger.debug("_______________________ App1 envia p/ App2 ________________________")
             app1.sendGreetings("App2")
                 .then(reciboEnvio => {
                     app1.getRequestsReceived().length.should.be.eql(0);
@@ -175,9 +180,8 @@ describe('Messaging Tests',function() {
                     return reciboEnvio;
                 })
                 .then(reciboEvento => {
-                    logger.info("_______________________ App2 recebe e responde _____________________")
+                    logger.debug("_______________________ App2 recebe e responde _____________________")
                     return app2.receiveMessages()
-                    console.log("### Chegou no fim com", reciboEvento)
                 })
                 .then(numOfMessages => {
                     numOfMessages.should.be.eql(1);
@@ -189,7 +193,7 @@ describe('Messaging Tests',function() {
                     return numOfMessages;
                 })
                 .then(_ => {
-                    logger.info("_______________________ App1 recebe consome _____________________")
+                    logger.debug("_______________________ App1 recebe consome _____________________")
                     return app1.receiveMessages();
                 })
                 .then(numOfMessages => {
@@ -209,17 +213,107 @@ describe('Messaging Tests',function() {
                 });
         })
 
-    //     /**
-    //      * Producer should validate and return a ServiceNotFoundError
-    //      */
-    //     it('Send to inexistent app',function(done){
-    //         app1.sendRequest("unknown","unknown",{
-    //             linkedin_profile:'https://www.linkedin.com.br/in/calebebrim' 
-    //         },"jobid=1").then(_=>done(new Error('Should not execute sucessfully'))).catch(err=>{
-    //             if(/^ServiceNotFoundError:.*/.test(err.message)) done()
-    //             else done(err)
-    //         });
-    //     })
+        it('Send and dismiss message', function(done) {
+            this.timeout(30000);
+
+            logger.debug("_______________________ App1 envia p/ App2 ________________________")
+            app1.sendGreetings("App2")
+                .then(reciboEnvio => {
+                    app1.getRequestsReceived().length.should.be.eql(0);
+                    app1.getResponsesReceived().length.should.be.eql(0);
+                    app2.getRequestsReceived().length.should.be.eql(0);
+                    app2.getResponsesReceived().length.should.be.eql(0);
+                    return reciboEnvio;
+                })
+                .then(reciboEvento => {
+                    logger.debug("_______________________ App2 recebe mas não responde _____________________")
+                    app2.setReplyEnabled(false);
+                    return app2.receiveMessages()
+                            .then(_ => app1.receiveMessages())
+                })
+                // Como o app2 não respondeu, app1 não recebe mensagem nenhuma...
+                .then(numOfMessages => {
+                    numOfMessages.should.be.eql(0);
+                    done()
+                })
+                .catch(error => {
+                    done(error);
+                });
+        })
+        
+        /**
+         * Producer should validate and return a ServiceNotFoundError
+         */
+        it('Send to inexistent app', function(done){
+            this.timeout(30000);
+
+            logger.debug("_______________________ App1 envia p/ BLARGH ________________________")
+            app1.sendGreetings("BLARGH")
+                .then(reciboEnvio => {
+                    app1.getRequestsReceived().length.should.be.eql(0);
+                    app1.getResponsesReceived().length.should.be.eql(0);
+                    app2.getRequestsReceived().length.should.be.eql(0);
+                    app2.getResponsesReceived().length.should.be.eql(0);
+                    return reciboEnvio;
+                })
+                // Como o app2 não respondeu, app1 não recebe mensagem nenhuma...
+                .then(numOfMessages => {
+                    done("Não deveria executar aqui porque a mensagem não saiu...");
+                })
+                .catch(error => {
+                    error.message.should.be.eql("No queue found for app: BLARGH");
+                    done();
+                });
+        })
+
+        it('Request invalid service - No one knows wrong_greetings', function(done) {
+            this.timeout(30000);
+
+            logger.debug("_______________________ App1 envia p/ App2 ________________________")
+            app1.sendWrong("App2")
+                .then(reciboEnvio => {
+                    done("Não deveria conseguir enviar porque app1 não tem response handler registrado");
+                })
+                .catch(error => {
+                    error.message.should.be.eql("Can't send to service wrong_greetings without a response handler registered.");
+                    done();
+                });
+        })
+
+        it('Request invalid service - App1 knows wrong_greetings', function(done) {
+            this.timeout(30000);
+
+            // primeiro faz o registro de wrong_greetings pra poder lançar
+            app1.registerWrongHandler();
+
+            logger.debug("_______________________ App1 envia p/ App2 ________________________")
+            app1.sendWrong("App2")
+                .then(reciboEnvio => {
+                    app1.getRequestsReceived().length.should.be.eql(0);
+                    app1.getResponsesReceived().length.should.be.eql(0);
+                    app2.getRequestsReceived().length.should.be.eql(0);
+                    app2.getResponsesReceived().length.should.be.eql(0);
+                    return reciboEnvio;
+                })
+                .then(reciboEvento => {
+                    logger.debug("_______________________ App2 não chega a receber _____________________")
+                    return app2.receiveMessages()
+                            .then(_ => app1.receiveMessages())
+                })
+                // Como o app2 não respondeu, app1 não recebe mensagem nenhuma...
+                .then(numOfMessages => {
+                    numOfMessages.should.be.eql(1);
+                    app1.getResponsesReceived().length.should.be.eql(0);
+                    app1.getWrongResponsesReceived().length.should.be.eql(1);
+
+                    app1.getWrongResponsesReceived()[0].success.should.be.eql(false);
+                    app1.getWrongResponsesReceived()[0].body.error.should.be.eql("Service \'wrong_greetings\' not supported.");
+                    done()
+                })
+                .catch(error => {
+                    done(error);
+                });
+        })
         
     //     /**
     //      * App2 must process and return message error with UnknowMethodError
