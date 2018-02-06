@@ -5,11 +5,10 @@ const HunterMessaging = require('../../src/main.js').messages;
 // const aws_config_file_path = './config.development.json'
 const localstackUtils = require('../utils/localstack')
 const path = require('path')
+const sleep = require('sleep')
 const DEFAULT_CONF = path.resolve(__dirname, '../hapi.test.peoplesearch.worker.json')
 const LOAD_LOCALSTACK = process.env.LOAD_LOCALSTACK != "false";
 
-// Localstack
-var localstack;
 
 describe('Messaging Tests',function() {  
     // Localstack initialization
@@ -26,14 +25,32 @@ describe('Messaging Tests',function() {
     });
     after(function() {
         this.timeout(60000); 
+
         if(LOAD_LOCALSTACK)
             return localstackUtils.stop()
         else
             return new Promise((res, rej) => res());
     });
     
-    // Deveria fazer o purge das filas para evitar contaminação entre os cenários
-    beforeEach(function() { this.timeout(30000); return localstackUtils.purgeSQS()});
+    // Faz o purge das filas para evitar contaminação entre os cenários
+    beforeEach(function(done) { 
+        const waitingTime = 1000;
+        this.timeout(60000); 
+
+        while(!localstackUtils.isRunning()) {
+            logger.info("Waiting to localstack to be ready.");
+            sleep.nsleep(waitingTime);
+        }
+        localstackUtils.purgeSQS()
+            .then(_ => {
+                logger.debug("Queues purged.");
+                done()
+            })
+            .catch(err => {
+                logger.warn("Error cleaning queues:", err.message);
+                done();
+            });
+    });
     // afterEach (done => localstackUtils.stop().then(done()))
 
     describe('Test Configurations', function() {

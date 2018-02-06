@@ -14,6 +14,7 @@ AWS.config.update({
 
 var instance = null;
 var services2start = null;
+var isInstanceRunning = false;
 
 function start(opts) {
     return new Promise((resolve, reject) => {
@@ -26,6 +27,7 @@ function start(opts) {
                 logger.info(`stdout: ${line}`);
                 if(line === 'Ready.') {
                     logger.info("Localstack is ready !");
+                    isInstanceRunning = true;
                     resolve()
                 }
             })
@@ -33,15 +35,16 @@ function start(opts) {
 
         // Saidas na stream de erro
         instance.stderr.on('data', (data) => {
-            // console.log(`stderr: ${data}`);
+            // data.toString().split('\n').forEach(l => logger.warn(l))
         });
         instance.on('close', (code) => {
+            isInstanceRunning = false;
             logger.error(`Localstack has being terminated with code: ${code}`);
         });
 
         // Quantos os testes acabarem, termina o processo também.
         process.on('beforeExit',function(code){
-            stop().then();
+            stop().then(_ => isInstanceRunning = false);
         })            
     });
 }
@@ -52,9 +55,14 @@ function stop() {
 
         instance.kill('SIGINT');     
         instance.on('close', function(){
+            isInstanceRunning = false;
             resolve();
         })       
     });
+}
+
+function isRunning() {
+    return isInstanceRunning;
 }
 
 
@@ -69,12 +77,16 @@ function purgeSQS() {
 
     return new Promise((resolve, reject) => {
         sqsAPI.listQueues({}, function(err, data) {
-            if(err)
+            if(err) {
                 reject(err);
-            if(!data)
+                return;
+            }
+            if(!data || !data.QueueUrls) {
                 resolve();
+                return;
+            }
 
-            Promise.all(data.QueueUrls.map(u => {
+            resolve(Promise.all(data.QueueUrls.map(u => {
                     return {
                         QueueUrl: u
                     }
@@ -86,11 +98,10 @@ function purgeSQS() {
                         else res();
                       });
                 }))
-            ).then(resolve())
-            .catch(reject());
+            ));
         });
     });
 }
 
-module.exports = {start, stop, purgeSQS};
+module.exports = {start, stop, isRunning, purgeSQS};
             

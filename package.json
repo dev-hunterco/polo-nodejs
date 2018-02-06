@@ -6,6 +6,7 @@
   "dependencies": {
     "aws-sdk": "^2.142.0",
     "clone": "^2.1.1",
+    "sleep": "^5.1.1",
     "winston": "^2.4.0"
   },
   "devDependencies": {
