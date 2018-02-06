@@ -58,6 +58,8 @@ var HunterMessaging = class HunterMessaging {
 
     initializeSQS() {
         if(this.config.aws && this.config.aws.sqs ) {
+            logger.info(process.env);
+            logger.info(this.config.aws.sqs);
             logger.info('Initializing sqs using custom configuration...')
             this.awsAPIs.sqs = new AWS.SQS(this.config.aws.sqs);
         } else {
