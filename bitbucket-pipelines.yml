@@ -1,4 +1,4 @@
-image: ethorgate/python3.4-node6
+image: thorgate/python3.4-node6
 pipelines:
   default:
     - step:
