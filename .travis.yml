@@ -6,7 +6,7 @@ node_js:
 env:
     - LOAD_LOCALSTACK: false
     - SERVICES: sqs,sns
-    
+
 services:
   - docker
 
@@ -20,7 +20,4 @@ before_install:
 cache:
   directories:
     - "node_modules"
-
-install:
-    - pip install localstack
 
