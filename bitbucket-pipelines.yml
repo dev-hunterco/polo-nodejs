@@ -1,0 +1,25 @@
+image: thorgate/python3.4-node6
+
+definitions:
+  services:
+    localstack:
+      image: localstack/localstack
+      environment:
+        SERVICES: sqs,sns
+pipelines:
+  default:
+    - step:
+        caches:
+          - node
+        script:
+          - npm install
+          - npm run test
+        services:
+          - localstack
+  # custom:
+  #   deploy-runtime:
+  #     - step:
+  #         script:
+  #         - ./build-runtime.sh
+  #         - scp -i ~/.ssh/config gm-runtime.zip ubuntu@52.27.128.130:~/tmp 
+

@@ -1,0 +1,28 @@
+{
+    "app":"TestApp",
+    "worker":"test",
+    "stage":"test",
+    "aws":{
+        "api":{
+            "accessKeyId": "foobar",
+            "secretAccessKey": "foobar",
+            "region": "us-east-1"
+        },
+        "sqs":{
+            "create":true,
+            "endpoint":"http://localhost:4576",
+            "consume":{
+                "MaxNumberOfMessages":1,
+                "VisibilityTimeout":60000,
+                "WaitTimeSeconds":1
+            }            
+        },
+        "sns":{
+            "endpoint":"http://localhost:4575"
+        }
+    }, 
+    "log":{
+        "debug":false
+    }
+
+}
