@@ -1,5 +1,5 @@
 const logger = require('winston')
-const HunterMessaging = require('../../src/main.js').messages;
+const PoloMessaging = require('../../src');
 
 const SampleApp = class SampleApp {
     constructor(name, config) {
@@ -13,7 +13,7 @@ const SampleApp = class SampleApp {
     }
 
     initializeQueue() {
-        this.messagingAPI = new HunterMessaging(this.config);
+        this.messagingAPI = new PoloMessaging(this.config);
         return this.messagingAPI.initializeSQS()
         .then(_ => {
                 logger.info("Queue initialized for ", this.name);
