@@ -3,6 +3,20 @@ language: node_js
 node_js:
   - "6"
 
+env:
+    - LOAD_LOCALSTACK: false
+    - SERVICES: sqs,sns
+    
+services:
+  - docker
+
+Starting mock SQS (http port 4576)...
+
+before_install:
+- docker pull localstack/localstack
+- docker run -d -p 127.0.0.1:4575:4575 -p 127.0.0.1:4576:4576 localstack/localstack
+- docker ps -a
+
 cache:
   directories:
     - "node_modules"
