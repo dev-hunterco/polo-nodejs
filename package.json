@@ -1,6 +1,6 @@
 {
-  "name": "polo-api",
-  "version": "1.0.0",
+  "name": "hunterco-polo",
+  "version": "0.1.0",
   "description": "HunterCo API for async message exchange between applications.",
   "main": "./src/index.js",
   "dependencies": {
@@ -19,5 +19,9 @@
     "test": "mocha \"test/**/*.spec.js\""
   },
   "author": "HunterCo",
-  "license": "LGPL"
+  "license": "LGPL",
+  
+  "publishConfig": {
+    "access": "public"
+  }
 }

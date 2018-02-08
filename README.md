@@ -1,3 +1,5 @@
+[![Build Status](https://travis-ci.org/dev-hunterco/polo-nodejs.svg?branch=master)](https://travis-ci.org/dev-hunterco/polo-nodejs)
+
 # HunterCo Polo Messenger
 
 Polo is a lightweight framework designed to enable exchange of asynchronous messages between applications (usually in a microservice environment).
