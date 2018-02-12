@@ -308,5 +308,104 @@ describe('Messaging Tests',function() {
                 });
         })
     })
+
+    describe('Forwarding messages', function(){
+        const SampleApp = require('./sample_app');
+        const SampleBroker = require('./sample_broker');
+        var app1 = new SampleApp("App1", clone(require(DEFAULT_CONF)));
+        var app2 = new SampleApp("App2", clone(require(DEFAULT_CONF)));
+        var broker = new SampleBroker("Broker", clone(require(DEFAULT_CONF)));
+
+        before(() => app1.initializeQueue());
+        before(() => app2.initializeQueue());
+        before(() => broker.initializeQueue());
+
+        beforeEach((done) => {
+            app1.reset();
+            app2.reset()
+            broker.reset()
+            done()
+        });
+
+        // Faz o purge das filas para evitar contaminação entre os cenários
+        beforeEach(function() { 
+            const waitingTime = 1000;
+            this.timeout(60000); 
+
+            while(LOAD_LOCALSTACK && !localstackUtils.isRunning()) {
+                logger.info("Waiting to localstack to be ready.");
+                sleep.msleep(waitingTime);
+            }
+            return localstackUtils.purgeSQS()
+        });
+        
+        it('Send to broker and receive message', function(done) {
+            this.timeout(30000);
+
+            logger.debug("_______________________ App1 to Broker ________________________")
+            app1.sendGreetings("Broker")
+                .then(reciboEnvio => {
+                    app1.getRequestsReceived().length.should.be.eql(0);
+                    app1.getResponsesReceived().length.should.be.eql(0);
+                    app2.getRequestsReceived().length.should.be.eql(0);
+                    app2.getResponsesReceived().length.should.be.eql(0);
+                    broker.getRequestsReceived().length.should.be.eql(0);
+                    broker.getResponsesReceived().length.should.be.eql(0);
+                    return reciboEnvio;
+                })
+
+                .then(reciboEvento => {
+                    logger.debug("_______________________ Broker receives and forwards _____________________")
+                    return broker.receiveMessages()
+                })
+                .then(numOfMessages => {
+                    numOfMessages.should.be.eql(1);
+                    app1.getRequestsReceived().length.should.be.eql(0);
+                    app1.getResponsesReceived().length.should.be.eql(0);
+                    app2.getRequestsReceived().length.should.be.eql(0);
+                    app2.getResponsesReceived().length.should.be.eql(0);
+                    broker.getRequestsReceived().length.should.be.eql(1);
+                    return numOfMessages;
+                })
+
+                .then(reciboEvento => {
+                    logger.debug("_______________________ App2 receives and responds (to app1) _____________________")
+                    return app2.receiveMessages()
+                })
+                .then(numOfMessages => {
+                    numOfMessages.should.be.eql(1);
+                    app1.getRequestsReceived().length.should.be.eql(0);
+                    app1.getResponsesReceived().length.should.be.eql(0);
+                    app2.getRequestsReceived().length.should.be.eql(1);
+                    app2.getResponsesReceived().length.should.be.eql(0);
+                    // It should only be "Hello, Broker" because sampleApp adds broker's name in the string
+                    app2.getRequestsReceived()[0].body.should.be.eql("Hello, Broker... I'm App1");
+                    broker.getRequestsReceived().length.should.be.eql(1);
+                    return numOfMessages;
+                })
+                .then(_ => {
+                    logger.debug("_______________________ App1 gets a response _____________________")
+                    return app1.receiveMessages();
+                })
+                .then(numOfMessages => {
+                    app1.getRequestsReceived().length.should.be.eql(0);
+                    app1.getResponsesReceived().length.should.be.eql(1);
+                    app2.getRequestsReceived().length.should.be.eql(1);
+                    app2.getResponsesReceived().length.should.be.eql(0);
+                    app1.getResponsesReceived()[0].body.answer.should.be.eql("Nice to meet you!")
+
+                    app1.getResponsesReceived()[0].originalMessage.forwardedBy.application.should.be.eql("Broker");
+                    return numOfMessages;
+                })
+                .then(numOfMessages => {
+                    numOfMessages.should.be.eql(1);
+                    done()
+                })
+                .catch(error => {
+                    done(error);
+                });
+        })
+    })
+
 })
 

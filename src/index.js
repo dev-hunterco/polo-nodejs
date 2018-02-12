@@ -180,10 +180,10 @@ var PoloMessaging = class PoloMessaging {
         if(messageBody.type === "request") {
             handlerMap = this.requestHandlers;
             messageWrapper.reply = createReplyMethod(this, messageBody, message.ReceiptHandle);
+            messageWrapper.forward = createForwardMethod(this, messageBody, message.ReceiptHandle);
         }
         else if(messageBody.type === "response") {
             handlerMap = this.responseHandlers;
-            messageWrapper.done = createDoneMethod(this, message.ReceiptHandle);
         }
         else {
             // Mensagem recebida tem um tipo incompatível.
@@ -196,6 +196,7 @@ var PoloMessaging = class PoloMessaging {
                 reject("Incompatible message type");
             })
         }
+        messageWrapper.done = createDoneMethod(this, message.ReceiptHandle);
         messageWrapper.dismiss = createDismissMethod(this, message.ReceiptHandle);
 
         // Procura o handler
@@ -216,7 +217,7 @@ var PoloMessaging = class PoloMessaging {
 
         var handlerPromise = handlerFnc(messageWrapper);
         // Ops, não retornou uma promise... rejeita
-        if(handlerPromise.then == null) {
+        if(handlerPromise == null || handlerPromise.then == null) {
             return new Promise((res, rej) => {
                 rej(new Error("Handler for " + messageBody.service + " must return a promise."));
             })
@@ -308,6 +309,30 @@ function createReplyMethod(apiRef, messageBody, receipt) {
         if(replyMsg.payload == null || replyMsg.payload === "") delete replyMsg.payload;
 
         return sendToQueue(apiRef.awsAPIs.sqs, messageBody.sentBy.callback, replyMsg)
+                .then(removeFromQueue(apiRef.awsAPIs.sqs, apiRef.queueURL, receipt))
+    }
+}
+
+function createForwardMethod(apiRef, messageBody, receipt) {
+    return function(destination) {
+        var forwardMsg = {
+            conversation: messageBody.conversation,
+            id: UUID(),
+            type: "request",
+            sentBy: messageBody.sentBy,
+            forwardedBy: {
+                application: apiRef.config.app,
+                instance: apiRef.config.worker,
+            },
+            service: messageBody.service,
+            body: messageBody.body,
+            payload: messageBody.payload,
+            timestamp: new Date()
+        }
+        if(forwardMsg.payload == null || forwardMsg.payload === "") delete forwardMsg.payload;
+
+        return findQueue(apiRef.awsAPIs.sqs, destination)
+                .then(queue => sendToQueue(apiRef.awsAPIs.sqs, queue, forwardMsg))
                 .then(removeFromQueue(apiRef.awsAPIs.sqs, apiRef.queueURL, receipt))
     }
 }

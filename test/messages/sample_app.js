@@ -34,7 +34,7 @@ const SampleApp = class SampleApp {
     }
 
     onRequestArrived(message) {
-        logger.debug(this.name + " - Message received by", this.name, "from", message.sentBy.application);
+        logger.info(this.name + " - Message received by", this.name, "from", message.sentBy.application);
 
         // Sempre registra as mensagens recebidas, mesmo quando não processa.
         this.requests.push(message);
@@ -53,7 +53,7 @@ const SampleApp = class SampleApp {
 
     sendGreetings(destination, payload) {
         var message = "Hello, " + destination + "... I'm " + this.name;
-        return this.messagingAPI.sendRequest(destination, "greetings", message);;
+        return this.messagingAPI.sendRequest(destination, "greetings", message);
     }
 
     receiveMessages() {

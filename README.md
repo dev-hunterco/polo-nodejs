@@ -8,7 +8,7 @@ Message transport is based on AWS SQS (and SNS for events, in the future).
 
 ## Anatomy of messages
 
-Polo defines two (very straigforward) types of messages:
+Polo defines two (very straightforward) types of messages:
 
 * Request: When one application wants to call a service to a second app.
 * Response: When the second application sends the first a response 
@@ -124,6 +124,20 @@ Polo won't read the queue automatically and the applications (both consumer and 
         , 1000
     )
 ```
+
+# Forwarding messages
+
+Messages can be forwarded to another application to be consumed. It's mostly used when you have, for example, a broker or orchestrator that will decide where to send the message to.
+
+Here's an example of how to forward a message:
+
+```
+poloAPI.onResponse ("greetings", function(message) {
+    return poloAPI.forward("anotherApp");
+});
+```
+
+When a message is forwarded, the SentBy information is kept as being the original sender, although a "forwardedBy" property is added to the message to enable tracking.
 
 # Who is Polo
 
