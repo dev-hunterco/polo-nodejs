@@ -1,6 +1,6 @@
 {
   "name": "hunterco-polo",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "HunterCo API for async message exchange between applications.",
   "main": "./src/index.js",
   "dependencies": {
