@@ -180,6 +180,7 @@ var PoloMessaging = class PoloMessaging {
         if(messageBody.type === "request") {
             handlerMap = this.requestHandlers;
             messageWrapper.reply = createReplyMethod(this, messageBody, message.ReceiptHandle);
+            messageWrapper.replyError = createReplyErrorMethod(this, messageBody, message.ReceiptHandle);
             messageWrapper.forward = createForwardMethod(this, messageBody, message.ReceiptHandle);
         }
         else if(messageBody.type === "response") {
@@ -225,9 +226,17 @@ var PoloMessaging = class PoloMessaging {
         return handlerPromise;
     }
 
-    readMessages() {
+    readMessages(params) {
+        // merge default parameters with requests, if any 
+        var realParams = clone(this.config.aws.sqs.consume);
+        if(params) {
+            Object.keys(params).forEach(p => {
+                realParams[key] = params[key];
+            })
+        }
+
         var numOfMessages = 0;
-        return getMessages(this.awsAPIs.sqs, this.queueURL)
+        return getMessages(this.awsAPIs.sqs, this.queueURL, realParams)
             .then(messages => {
                 if(messages == null)
                     messages = [];
@@ -268,9 +277,12 @@ function sendToQueue(sqsAPI, queueUrl, data) {
     });
 }
 
-function getMessages(sqsAPI, queueUrl) {
+function getMessages(sqsAPI, queueUrl, params) {
+    var realParams = clone(params);
+    realParams.QueueUrl = queueUrl;
+
     return new Promise((resolve, reject) => {
-        sqsAPI.receiveMessage({QueueUrl:queueUrl}, function(err, data) {
+        sqsAPI.receiveMessage(realParams, function(err, data) {
             if (err) reject(err)
             else resolve(data.Messages)
         });
@@ -310,6 +322,12 @@ function createReplyMethod(apiRef, messageBody, receipt) {
 
         return sendToQueue(apiRef.awsAPIs.sqs, messageBody.sentBy.callback, replyMsg)
                 .then(removeFromQueue(apiRef.awsAPIs.sqs, apiRef.queueURL, receipt))
+    }
+}
+
+function createReplyErrorMethod(apiRef, messageBody, receipt) {
+    return function(errorMessage) {
+        return replyError(apiRef, messageBody, receipt, errorMessage);
     }
 }
 
