@@ -49,8 +49,8 @@ describe('Messaging Tests',function() {
 
         it('No app name', function(done) {
             try {
-                var messagingAPI = new HunterMessaging({});
-                done(new Error("Não poderia ter inicializado sem config.app"))
+                var messagingAPI = new PoloMessaging({});
+                done(new Error("Should not have initialized without config.app"))
              } catch (error) {
                  done()
              }
@@ -58,8 +58,8 @@ describe('Messaging Tests',function() {
 
         it('No stage defined', function(done) {
             try {
-                var messagingAPI = new HunterMessaging({app:'testApp'});
-                done(new Error("Não poderia ter inicializado sem config.stage"))
+                var messagingAPI = new PoloMessaging({app:'testApp'});
+                done(new Error("Should not have initialized without config.stage"))
              } catch (error) {
                  done()
              }

@@ -7,6 +7,11 @@ const UUID = require('uuid')
 var PoloMessaging = class PoloMessaging {
     constructor(config) {
         this.checkConfiguration(config);
+        this.config = config;
+        if(this.config.aws != null && this.config.aws.api != null) {
+            AWS.config.update(this.config.aws.api)
+        }
+        
         this.awsAPIs = {}
 
         this.cachedURLs = {}
@@ -50,10 +55,6 @@ var PoloMessaging = class PoloMessaging {
             if(config.aws.sns == null) {
                 logger.warn("SNS configuration not set.");
             }
-        }
-        this.config = config;
-        if(this.config.aws != null && this.config.aws.api != null) {
-            AWS.config.update(this.config.aws.api)
         }
     }
 
