@@ -242,6 +242,9 @@ describe('Messaging Tests',function() {
         it('Send to inexistent app', function(done){
             this.timeout(30000);
 
+            // little trick to change autoCreate behavior dinamically
+            app1.messagingAPI.config.aws.sqs.create = false;
+            
             logger.debug("_______________________ App1 to BLARGH ________________________")
             app1.sendGreetings("BLARGH")
                 .then(reciboEnvio => {
@@ -257,6 +260,7 @@ describe('Messaging Tests',function() {
                 .catch(error => {
                     error.message.should.be.eql("No queue found for app: BLARGH");
                     done();
+                    app1.messagingAPI.config.aws.sqs.create = true;
                 });
         })
 

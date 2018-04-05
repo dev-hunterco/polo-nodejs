@@ -70,6 +70,7 @@ var PoloMessaging = class PoloMessaging {
         // Define o nome da fila
         this.queueName = this.config.app + "_" + this.config.stage;
 
+        
         var self = this;
         return new Promise(function(resolve,reject){
             self.awsAPIs.sqs.listQueues({QueueNamePrefix: self.queueName}, function(err, data) {
@@ -77,24 +78,16 @@ var PoloMessaging = class PoloMessaging {
                     reject(err);
                     return;
                 }
-                
+
                 if(data.QueueUrls) {
                     self.queueURL = data.QueueUrls[0]; // Não devem existir mais de uma fila
                     logger.info("Found queue for " + self.config.app + ": " + self.queueURL);
                     resolve()
                 }
                 else if (self.config.aws.sqs.create) {
-                    logger.info("Creating queue...");
-                    var params = {
-                        QueueName: self.queueName
-                    };
-                    self.awsAPIs.sqs.createQueue(params, function(err, data) {
-                        if (err) reject(err); 
-                        else {
-                            logger.info(`Queue created: ${JSON.stringify(data.QueueUrl)}`)
-                            self.queueURL = data.QueueUrl;
-                            resolve()
-                        }           
+                    createQueue(self.awsAPIs.sqs, self.queueName).then(url => {
+                        self.queueURL = url;
+                        resolve()
                     });
                 }
                 else {
@@ -128,7 +121,7 @@ var PoloMessaging = class PoloMessaging {
         var destQueue = this.cachedURLs[destApp];
         if(destQueue == null) {
             var targetQueue = destApp + "_" + this.config.stage; // sempre usa o mesmo stage do app
-            promise = findQueue(this.awsAPIs.sqs, targetQueue)
+            promise = findQueue(this.awsAPIs.sqs, targetQueue, this.config.aws.sqs.create)
                         .then(queue => {
                             return queue
                         })
@@ -207,9 +200,7 @@ var PoloMessaging = class PoloMessaging {
         }
         if(forwardMsg.payload == null || forwardMsg.payload === "") delete forwardMsg.payload;
     
-        console.log("_____Forwarding message to", destination);
-
-        return findQueue(this.awsAPIs.sqs, destination)
+        return findQueue(this.awsAPIs.sqs, destination, this.config.aws.sqs.create)
                 .then(queue => sendToQueue(this.awsAPIs.sqs, queue, forwardMsg))
     }
 
@@ -229,7 +220,6 @@ var PoloMessaging = class PoloMessaging {
         if(replyMsg.payload == null || replyMsg.payload === "") delete replyMsg.payload;
         return sendToQueue(this.awsAPIs.sqs, originalMessage.sentBy.callback, replyMsg)
     }
-    
     
     processMessage(message) {
         var messageBody = JSON.parse(message.Body);
@@ -319,21 +309,41 @@ var PoloMessaging = class PoloMessaging {
             .catch(errors => {
                 logger.warn("*** Errors detected when processing messages");
                 if(errors)
-                    console.log("ERRORS:", errors);
+                    logger.warn("ERRORS:", errors);
             })
             .then(_ => numOfMessages);
     }
 }
 
-function findQueue(sqsAPI, queueName) {
+function findQueue(sqsAPI, queueName, autoCreate) {
     return new Promise((resolve, reject) => {
         sqsAPI.listQueues({QueueNamePrefix: queueName}, function(err, data) {
             if(err)
                 reject(err);
             else if(data.QueueUrls == null || data.QueueUrls.length == 0)
-                reject("No queue found for " + queueName);
+                if(autoCreate) {
+                    createQueue(sqsAPI, queueName).then(resolve);
+                }
+                else
+                    reject("No queue found for " + queueName);
             else
                 resolve(data.QueueUrls[0]);
+        });
+    })
+}
+
+function createQueue(sqsAPI, queueName) {
+    logger.info("Creating queue... ", sqsAPI != null);
+    var params = {
+        QueueName: queueName
+    };
+    return new Promise((res, rej) => {
+        sqsAPI.createQueue(params, function(err, data) {
+            if (err) rej(err); 
+            else {
+                logger.info(`Queue created: ${JSON.stringify(data.QueueUrl)}`)
+                res(data.QueueUrl)
+            }           
         });
     })
 }
