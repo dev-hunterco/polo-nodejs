@@ -169,6 +169,68 @@ var PoloMessaging = class PoloMessaging {
             });
     }
 
+    sendAsyncResponse(originalMessage, answer) {
+        var replyMsg = {
+            conversation: originalMessage.conversation,
+            id: UUID(),
+            type: "response",
+            sentBy: {
+                application: this.config.app,
+                instance: this.config.worker,
+            },
+            service: originalMessage.service,
+            body: answer,
+            success: true,
+            payload: originalMessage.payload,
+            timestamp: new Date(),
+            originalMessage: originalMessage
+        }
+        if(replyMsg.payload == null || replyMsg.payload === "") delete replyMsg.payload;
+
+        return sendToQueue(this.awsAPIs.sqs, originalMessage.sentBy.callback, replyMsg);
+    }
+
+    sendAsyncForward(originalMessage, destination) {
+        var forwardMsg = {
+            conversation: originalMessage.conversation,
+            id: UUID(),
+            type: "request",
+            sentBy: originalMessage.sentBy,
+            forwardedBy: {
+                application: this.config.app,
+                instance: this.config.worker,
+            },
+            service: originalMessage.service,
+            body: originalMessage.body,
+            payload: originalMessage.payload,
+            timestamp: new Date()
+        }
+        if(forwardMsg.payload == null || forwardMsg.payload === "") delete forwardMsg.payload;
+    
+        console.log("_____Forwarding message to", destination);
+
+        return findQueue(this.awsAPIs.sqs, destination)
+                .then(queue => sendToQueue(this.awsAPIs.sqs, queue, forwardMsg))
+    }
+
+    sendAsyncReplyError(originalMessage, error) {
+        var replyMsg = {
+            type: "response",
+            sentBy: {
+                application: this.config.app,
+                instance: this.config.worker,
+            },
+            service: originalMessage.service,
+            body: {error: error},
+            success: false,
+            payload: originalMessage.payload,
+            originalMessage: originalMessage
+        }
+        if(replyMsg.payload == null || replyMsg.payload === "") delete replyMsg.payload;
+        return sendToQueue(this.awsAPIs.sqs, originalMessage.sentBy.callback, replyMsg)
+    }
+    
+    
     processMessage(message) {
         var messageBody = JSON.parse(message.Body);
         var handlerMap = null;
@@ -323,24 +385,7 @@ function removeFromQueue(sqsAPI, queueUrl, receipt){
 
 function createReplyMethod(apiRef, messageBody, receipt) {
     return function(answer) {
-        var replyMsg = {
-            conversation: messageBody.conversation,
-            id: UUID(),
-            type: "response",
-            sentBy: {
-                application: apiRef.config.app,
-                instance: apiRef.config.worker,
-            },
-            service: messageBody.service,
-            body: answer,
-            success: true,
-            payload: messageBody.payload,
-            timestamp: new Date(),
-            originalMessage: messageBody
-        }
-        if(replyMsg.payload == null || replyMsg.payload === "") delete replyMsg.payload;
-
-        return sendToQueue(apiRef.awsAPIs.sqs, messageBody.sentBy.callback, replyMsg)
+        return apiRef.sendAsyncResponse(messageBody, answer)
                 .then(removeFromQueue(apiRef.awsAPIs.sqs, apiRef.queueURL, receipt))
     }
 }
@@ -353,43 +398,13 @@ function createReplyErrorMethod(apiRef, messageBody, receipt) {
 
 function createForwardMethod(apiRef, messageBody, receipt) {
     return function(destination) {
-        var forwardMsg = {
-            conversation: messageBody.conversation,
-            id: UUID(),
-            type: "request",
-            sentBy: messageBody.sentBy,
-            forwardedBy: {
-                application: apiRef.config.app,
-                instance: apiRef.config.worker,
-            },
-            service: messageBody.service,
-            body: messageBody.body,
-            payload: messageBody.payload,
-            timestamp: new Date()
-        }
-        if(forwardMsg.payload == null || forwardMsg.payload === "") delete forwardMsg.payload;
-
-        return findQueue(apiRef.awsAPIs.sqs, destination)
-                .then(queue => sendToQueue(apiRef.awsAPIs.sqs, queue, forwardMsg))
+        return apiRef.sendAsyncForward(messageBody, destination)
                 .then(removeFromQueue(apiRef.awsAPIs.sqs, apiRef.queueURL, receipt))
     }
 }
 
 function replyError(apiRef, messageBody, receipt, errorInfo) {
-    var replyMsg = {
-        type: "response",
-        sentBy: {
-            application: apiRef.config.app,
-            instance: apiRef.config.worker,
-        },
-        service: messageBody.service,
-        body: {error: errorInfo},
-        success: false,
-        payload: messageBody.payload,
-        originalMessage: messageBody
-    }
-    if(replyMsg.payload == null || replyMsg.payload === "") delete replyMsg.payload;
-    return sendToQueue(apiRef.awsAPIs.sqs, messageBody.sentBy.callback, replyMsg)
+    return apiRef.sendAsyncReplyError(messageBody, errorInfo)
             .then(removeFromQueue(apiRef.awsAPIs.sqs, apiRef.queueURL, receipt))
 }
 
