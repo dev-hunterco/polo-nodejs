@@ -217,14 +217,24 @@ var PoloMessaging = class PoloMessaging {
             }
         }
 
-        var handlerPromise = handlerFnc(messageWrapper);
-        // Ops, não retornou uma promise... rejeita
-        if(handlerPromise == null || handlerPromise.then == null) {
+        try {
+            var handlerPromise = handlerFnc(messageWrapper);
+            // Ops, não retornou uma promise... rejeita
+            if(handlerPromise == null || handlerPromise.then == null) {
+                return new Promise((res, rej) => {
+                    logger.warn("Handler should be a Promise returning message.<action>(...)");
+                    // Since it's not a promise, the handlerPromise is, actually, the result, so return it
+                    res(handlerPromise);
+                })
+            }
+            return handlerPromise;
+        } catch(err) {
             return new Promise((res, rej) => {
-                rej(new Error("Handler for " + messageBody.service + " must return a promise."));
+                logger.error("** Handler has thrown an exception:", err);
+                // Since it's not a promise, the handlerPromise is, actually, the result, so return it
+                rej(handlerPromise);
             })
         }
-        return handlerPromise;
     }
 
     readMessages(params) {
@@ -243,6 +253,11 @@ var PoloMessaging = class PoloMessaging {
                     messages = [];
                 numOfMessages = messages.length;
                 return Promise.all(messages.map(m => this.processMessage(m)))
+            })
+            .catch(errors => {
+                logger.warn("*** Errors detected when processing messages");
+                if(errors)
+                    console.log("ERRORS:", errors);
             })
             .then(_ => numOfMessages);
     }
@@ -267,11 +282,15 @@ function sendToQueue(sqsAPI, queueUrl, data) {
         QueueUrl: queueUrl,
         DelaySeconds: 0
     };
+
+    logger.debug("Sending message to queue:", queueUrl);
+
     return new Promise((resolve, reject) => {
         sqsAPI.sendMessage(send_params, function(err, data) {
             if (err) {
                 reject(err)
             } else {
+                logger.debug("Message sent!");
                 resolve(data)
             }
         });
