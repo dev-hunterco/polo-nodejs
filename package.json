@@ -4,19 +4,21 @@
   "description": "HunterCo API for async message exchange between applications.",
   "main": "./src/index.js",
   "dependencies": {
-    "aws-sdk": "^2.142.0",
-    "clone": "^2.1.1",
-    "uuid": "^3.2.1",
-    "winston": "^2.4.0"
+    "clone": "^2.1.2",
+    "uuid": "^8.0.0",
+    "winston": "^3.2.1"
   },
   "devDependencies": {
-    "sleep": "^5.1.1",
-    "should": "^13.1.3",
-    "mocha": "^4.0.1",
-    "child_process": "^1.0.2"
+    "amqplib": "^0.5.6",
+    "aws-sdk": "^2.677.0",
+    "child_process": "^1.0.2",
+    "mocha": "^7.1.2",
+    "should": "^13.2.3",
+    "sleep-promise": "^8.0.1"
   },
   "scripts": {
-    "test": "mocha \"test/**/*.spec.js\""
+    "test": "mocha \"test/**/*.spec.js\"",
+    "test-only": "mocha"
   },
   "author": "HunterCo",
   "license": "LGPL-2.0-or-later",
