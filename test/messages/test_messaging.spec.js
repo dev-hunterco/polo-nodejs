@@ -148,7 +148,6 @@ describe('General',function() {
         });
 
         after(done => {
-          console.log("Fechando tudo aqui...")
           app1.messagingAPI.close()
           app2.messagingAPI.close()
           done()
