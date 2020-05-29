@@ -11,19 +11,17 @@ before_install:
 - docker run -d -e SERVICES='sqs,sns' -p 127.0.0.1:4575:4575 -p 127.0.0.1:4576:4576 localstack/localstack
 - docker ps -a
 - sleep 5
-# - node version-updater.js
-# - mv new-package.json package.json
-- if [ -z "$TRAVIS_TAG" ]; then
-    export NPM_TAG=next;
-   else
-    export NPM_TAG=$TRAVIS_TAG;
-  fi
-- echo "Publishing npm tag $NPM_TAG ${NPM_TAG}" 
 
 cache:
   directories:
   - node_modules
 
+before_deploy:
+  - source set-npm-tag.sh
+  # - node version-updater.js
+  # - mv new-package.json package.json
+  - echo "Publishing npm tag $NPM_TAG ${NPM_TAG}" 
+    
 deploy:
   provider: npm
   email: npmjs@flaviocordova.com
