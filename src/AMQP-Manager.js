@@ -5,22 +5,9 @@ const { logger } = require('./Logger-Loader')
 
 class AMQPTransporter {
   constructor() {
-    
   }
 
   verify(config) {
-    // logger.info("Checking AWS Configuration...")
-
-    // if(config.aws == null) {
-    //   logger.warn("AWS Credentials not set. Environment set?");
-    // } else {
-    //   if(config.aws.sqs == null) {
-    //     logger.warn("SQS configuration not set.");
-    //   }
-    //   if(config.aws.sns == null) {
-    //     logger.warn("SNS configuration not set.");
-    //   }
-    // }
   }
 
   initialize(config) {
@@ -41,7 +28,7 @@ class AMQPTransporter {
     this.channelState = 'ready'
 
     this.channel.on('drain', function() {
-      console.log("#### Channel is ready again !!!!!")
+      logger.info("#### Channel is ready again !!!!!")
       this.channelState = 'ready'
     })
   }
@@ -123,86 +110,5 @@ class AMQPTransporter {
     return this.connection.close()
   }
 }
-
-// // ==============================
-// // Inner, private functions
-// // ==============================
-// function findQueue(sqsAPI, queueName, autoCreate) {
-//   return new Promise((resolve, reject) => {
-//     sqsAPI.listQueues({QueueNamePrefix: queueName}, function(err, data) {
-//       if(err)
-//         reject(err);
-//       else if(data.QueueUrls == null || data.QueueUrls.length == 0)
-//         if(autoCreate) {
-//           createQueue(sqsAPI, queueName).then(resolve);
-//         }
-//         else
-//           reject("No queue found for " + queueName);
-//       else
-//         resolve(data.QueueUrls[0]);
-//     });
-//   })
-// }
-
-// function createQueue(sqsAPI, queueName) {
-//   logger.info("Creating queue... ", sqsAPI != null);
-//   var params = {
-//     QueueName: queueName
-//   };
-//   return new Promise((res, rej) => {
-//     sqsAPI.createQueue(params, function(err, data) {
-//       if (err) rej(err); 
-//       else {
-//         logger.info(`Queue created: ${JSON.stringify(data.QueueUrl)}`)
-//         res(data.QueueUrl)
-//       }           
-//     });
-//   })
-// }
-
-// function sendToQueue(sqsAPI, queueUrl, data) {
-//   var send_params = {
-//     MessageBody: JSON.stringify(data),
-//     QueueUrl: queueUrl,
-//     DelaySeconds: 0
-//   };
-
-//   logger.debug("Sending message to queue: " + queueUrl);
-
-//   return new Promise((resolve, reject) => {
-//     sqsAPI.sendMessage(send_params, function(err, data) {
-//       if (err) {
-//         reject(err)
-//       } else {
-//         logger.debug("Message sent!");
-//         resolve(data)
-//       }
-//     });
-//   });
-// }
-
-// function getMessages(sqsAPI, queueUrl, params) {
-//   var realParams = clone(params);
-//   realParams.QueueUrl = queueUrl;
-
-//   return new Promise((resolve, reject) => {
-//     sqsAPI.receiveMessage(realParams, function(err, data) {
-//       if (err) reject(err)
-//       else resolve(data.Messages)
-//     });
-//   })
-// }
-
-// function removeFromQueue(sqsAPI, queueUrl, receipt){
-//   return new Promise((resolve,reject) => {
-//     sqsAPI.deleteMessage({QueueUrl: queueUrl, ReceiptHandle: receipt }, 
-//       function(err, data) {
-//         if (err) reject(err);
-//         else {
-//             resolve();
-//         }
-//     });
-//   })
-// }
 
 module.exports = { AMQPTransporter } 

@@ -136,5 +136,12 @@ function purgeQueue(queueName) {
   });
 }
 
-module.exports = {start, stop, isRunning, getQueues, purgeQueue };
+function dispose() {
+  if(!!instance)
+    return stop()
+  else
+    return new Promise((res, rej) => res());
+}
+
+module.exports = {start, stop, isRunning, getQueues, purgeQueue, dispose };
             

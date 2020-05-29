@@ -48,7 +48,7 @@ var PoloMessaging = class PoloMessaging {
     this.transporter.verify(config)
 
     // Initialize transporter
-    this.transporter.initialize(config)
+    this.transporter.initialize(config, this)
     this.config = config;
 
 

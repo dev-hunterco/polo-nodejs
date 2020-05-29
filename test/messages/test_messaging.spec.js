@@ -17,6 +17,26 @@ class DumbTransporter {
   initialize() {}
 }
 
+const SyncTransporter = require('../transporters/Mem-direct').MemDirectTransporter
+const TRANSPORTERS = [
+  {
+    label: 'AWS SQS',
+    code: 'SQS',
+    helper: require('../utils/localstack')
+  }, 
+  {
+    label: 'AMQP',
+    code: 'AMQP',
+    helper: require('../utils/rabbit')
+  },
+  {
+    label: 'SyncTransporter',
+    code: 'memDirect',
+    impl: new SyncTransporter(),
+    syncMode: true
+  },
+]
+
 describe('General',function() {  
   describe('Test Configurations', function() {
     it('No Configuration', function(done) {
@@ -106,25 +126,19 @@ describe('General',function() {
     });
   })
 
-  const TRANSPORTERS = [
-    // {
-    //   label: 'AWS SQS',
-    //   code: 'SQS',
-    //   helper: require('../utils/localstack')
-    // }, 
-    {
-      label: 'AMQP',
-      code: 'AMQP',
-      helper: require('../utils/rabbit')
-    }
-  ]
-
   TRANSPORTERS.forEach(trans => {
     describe(`Testing ${trans.label} Transporter`, function() {
       const SampleApp = require('./sample_app');
 
       describe('Two Way integration', function() {
-        const confWithTransporter = clone(Object.assign({}, require(DEFAULT_CONF), { transporter: trans.code }))
+        let transporterConfig = null
+        if(!trans.impl)
+          transporterConfig = { transporter: trans.code }
+        else
+          transporterConfig = { transporter: trans.impl }
+
+        const confWithTransporter = clone(Object.assign({}, require(DEFAULT_CONF), transporterConfig))
+
         var app1 = new SampleApp("App1", clone(confWithTransporter));
         var app2 = new SampleApp("App2", clone(confWithTransporter));
     
@@ -137,20 +151,27 @@ describe('General',function() {
         });
     
         beforeEach((done) => { 
-          logger.debug("Purging Queues...");
-
-          // Some transporters may not be able to inspect queues, so name queues used in test
-          const usedQueues = ['App1_test', 'App2_test']
-          Promise.all(
-            usedQueues.map(q => trans.helper.purgeQueue(q))
-          )
-            .then(_ => done())
+          if(!trans.helper) done()
+          else {
+            logger.debug("Purging Queues...");
+  
+            // Some transporters may not be able to inspect queues, so name queues used in test
+            const usedQueues = ['App1_test', 'App2_test']
+            Promise.all(
+              usedQueues.map(q => trans.helper.purgeQueue(q))
+            )
+              .then(_ => done())
+          }
         });
 
         after(done => {
           app1.messagingAPI.close()
           app2.messagingAPI.close()
-          done()
+
+          if(trans.helper && trans.helper.dispose)
+            trans.helper.dispose().then(_ => done());
+          else
+            done()
         })
 
         it('Send and receive message', function(done) {
@@ -158,20 +179,12 @@ describe('General',function() {
     
           logger.debug("_______________________ App1 to App2 ________________________")
           app1.sendGreetings("App2")
-            .then(reciboEnvio => {
-              app1.getRequestsReceived().length.should.be.eql(0);
-              app1.getResponsesReceived().length.should.be.eql(0);
-              app2.getRequestsReceived().length.should.be.eql(0);
-              app2.getResponsesReceived().length.should.be.eql(0);
-              return sleep(DEFAULT_SLEEP)
-            })
-            .then(reciboEvento => {
+            .then(_ => sleep(DEFAULT_SLEEP))
+            .then(_ => {
               logger.debug("_______________________ App2 receives and responds _____________________")
               return app2.receiveMessages()
             })
             .then(_ => {
-              app1.getRequestsReceived().length.should.be.eql(0);
-              app1.getResponsesReceived().length.should.be.eql(0);
               app2.getRequestsReceived().length.should.be.eql(1);
               app2.getResponsesReceived().length.should.be.eql(0);
               app2.getRequestsReceived()[0].body.should.be.eql("Hello, App2... I'm App1");
@@ -184,8 +197,6 @@ describe('General',function() {
             .then(_ => {
               app1.getRequestsReceived().length.should.be.eql(0);
               app1.getResponsesReceived().length.should.be.eql(1);
-              app2.getRequestsReceived().length.should.be.eql(1);
-              app2.getResponsesReceived().length.should.be.eql(0);
               app1.getResponsesReceived()[0].body.answer.should.be.eql("Nice to meet you!")
               done()
             })
@@ -198,17 +209,12 @@ describe('General',function() {
           this.timeout(30000);
     
           logger.debug("_______________________ App1 to App2 ________________________")
+          // Disable reply on app2
+          app2.setReplyEnabled(false)
+
           app1.sendGreetings("App2")
-            .then(reciboEnvio => {
-              app1.getRequestsReceived().length.should.be.eql(0);
-              app1.getResponsesReceived().length.should.be.eql(0);
-              app2.getRequestsReceived().length.should.be.eql(0);
-              app2.getResponsesReceived().length.should.be.eql(0);
-              return reciboEnvio;
-            })
             .then(_ => {
               logger.debug("_______________________ App2 receives but won't answer _____________________")
-              app2.setReplyEnabled(false);
               return app2.receiveMessages()
                 .then(_ => app1.receiveMessages())
             })
@@ -221,6 +227,9 @@ describe('General',function() {
             })
             .catch(error => {
               done(error);
+            })
+            .finally(_ => {
+              app2.setReplyEnabled(true)
             });
         })
         
@@ -251,8 +260,8 @@ describe('General',function() {
                 done("Should never get here since an error should be raised.");
               })
               .catch(error => {
-                  error.message.should.be.eql("No queue found for app: BLARGH");
-                  done();
+                error.message.should.be.eql("No queue found for app: BLARGH");
+                done();
               })
               .finally(_ => {
                 Mocha.Runner.prototype.uncaught = mochaDefault
@@ -311,6 +320,13 @@ describe('General',function() {
     
         it('Send async response', function(done) {
           this.timeout(30000);
+
+          // Does not make sense to test async response if transporter is synched
+          if(trans.syncMode) {
+            logger.info(`Transporter ${trans.code} is synchronized, skipping test`)
+            done()
+            return
+          }
     
           logger.debug("_______________________ App1 to App2 ________________________")
           app1.sendAsyncGreetings("App2")
@@ -370,7 +386,13 @@ describe('General',function() {
 
       describe('Forwarding messages', function(){
         const SampleBroker = require('./sample_broker');
-        const confWithTransporter = clone(Object.assign({}, require(DEFAULT_CONF), { transporter: trans.code }))
+        let transporterConfig = null
+        if(!trans.impl)
+          transporterConfig = { transporter: trans.code }
+        else
+          transporterConfig = { transporter: trans.impl }
+
+        const confWithTransporter = clone(Object.assign({}, require(DEFAULT_CONF), transporterConfig))
 
         var app1 = new SampleApp("App1", clone(confWithTransporter))
         var app2 = new SampleApp("App2", clone(confWithTransporter))
@@ -389,14 +411,18 @@ describe('General',function() {
     
         // Faz o purge das filas para evitar contaminação entre os cenários
         beforeEach( (done) => { 
-          logger.info("Purging Queues...");
-
-          // Some transporters may not be able to inspect queues, so name queues used in test
-          const usedQueues = ['App1_test', 'App2_test', 'Broker_test']
-          Promise.all(
-            usedQueues.map(q => trans.helper.purgeQueue(q))
-          )
-            .then(_ => done())
+          if(!trans.helper) {
+            done()
+          } else {
+            logger.info("Purging Queues...");
+  
+            // Some transporters may not be able to inspect queues, so name queues used in test
+            const usedQueues = ['App1_test', 'App2_test', 'Broker_test']
+            Promise.all(
+              usedQueues.map(q => trans.helper.purgeQueue(q))
+            )
+              .then(_ => done())
+          }
         });
 
         after(done => {
@@ -413,23 +439,10 @@ describe('General',function() {
           app1.sendGreetings("Broker")
             .then(_ => sleep(DEFAULT_SLEEP))
             .then(_ => {
-              app1.getRequestsReceived().length.should.be.eql(0)
-              app1.getResponsesReceived().length.should.be.eql(0)
-              app2.getRequestsReceived().length.should.be.eql(0)
-              app2.getResponsesReceived().length.should.be.eql(0)
-              broker.getRequestsReceived().length.should.be.eql(0)
-              broker.getResponsesReceived().length.should.be.eql(0)
-              return 'ok'
-            })
-            .then(_ => {
               logger.debug("_______________________ Broker receives and forwards _____________________")
               return broker.receiveMessages()
             })
             .then(_ => {
-              app1.getRequestsReceived().length.should.be.eql(0);
-              app1.getResponsesReceived().length.should.be.eql(0);
-              app2.getRequestsReceived().length.should.be.eql(0);
-              app2.getResponsesReceived().length.should.be.eql(0);
               broker.getRequestsReceived().length.should.be.eql(1);
               return sleep(DEFAULT_SLEEP);
             })
@@ -439,8 +452,6 @@ describe('General',function() {
               return app2.receiveMessages()
             })
             .then(numOfMessages => {
-              app1.getRequestsReceived().length.should.be.eql(0);
-              app1.getResponsesReceived().length.should.be.eql(0);
               app2.getRequestsReceived().length.should.be.eql(1);
               app2.getResponsesReceived().length.should.be.eql(0);
               // It should only be "Hello, Broker" because sampleApp adds broker's name in the string
@@ -468,13 +479,15 @@ describe('General',function() {
             });
           })
         })
+
       })
+
     })
     
-    // // // Localstack initialization
-    // before(function() {
-      //   var newEnv = clone(process.env);
-      //   newEnv.SERVICES = "sqs"
+  //   // // Localstack initialization
+  //   before(function() {
+  //       var newEnv = clone(process.env);
+  //       newEnv.SERVICES = "sqs"
       
   //   this.timeout(60000); 
 
@@ -489,16 +502,5 @@ describe('General',function() {
   //       setTimeout(res, 2000);
   //     });
   // });
-  // after(function() {
-  //     this.timeout(60000); 
-
-  //     if(LOAD_LOCALSTACK)
-  //         return localstackUtils.stop()
-  //     else
-  //         return new Promise((res, rej) => res());
-  // });
-
-
-    
 })
 
