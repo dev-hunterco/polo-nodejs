@@ -11,9 +11,9 @@ before_install:
 - docker run -d -e SERVICES='sqs,sns' -p 127.0.0.1:4575:4575 -p 127.0.0.1:4576:4576 localstack/localstack
 - docker ps -a
 - docker logs rabbitmq3
-- sleep 30
+- sleep 5
 - docker logs rabbitmq3
-- node version-updater.node.js
+- node version-updater.js
 - mv new-package.json package.json
 cache:
   directories:
