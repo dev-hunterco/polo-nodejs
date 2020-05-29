@@ -1,4 +1,4 @@
-const currentVersion = process.env.TRAVIS_TAG || '@next'
+const currentVersion = process.env.TRAVIS_TAG || 'next'
 const fs = require('fs');
 console.log('Updating package.json to version:', currentVersion)
 
