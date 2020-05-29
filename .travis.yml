@@ -11,14 +11,14 @@ before_install:
 - docker run -d -e SERVICES='sqs,sns' -p 127.0.0.1:4575:4575 -p 127.0.0.1:4576:4576 localstack/localstack
 - docker ps -a
 - sleep 5
-- node version-updater.js
-- mv new-package.json package.json
+# - node version-updater.js
+# - mv new-package.json package.json
 - if [ -z "$TRAVIS_TAG" ]; then
     export NPM_TAG=next;
    else
     export NPM_TAG=$TRAVIS_TAG;
   fi
-- echo "Publishing npm tag $NPM_TAG"
+- echo "Publishing npm tag $NPM_TAG" env(NPM_TAG)
 
 cache:
   directories:
@@ -31,4 +31,4 @@ deploy:
     secure: MGsA4XbpgTLou+KII5NjN27redBjaqhQNCqQW3RM6Z8EzH9ojO/k95/RXbj2OYVVh2EtyLu4kPXt0TUpcelJECp6h+cPSx32ykp/Iasg33yapQA9uW1DvbeLueqGyRrxRxz/CChKtm7/QPzV19eNxoJDy0OnH4AhP6/kBWgdSFxagTiq68kU4gS1EAHhglWFOcvcSGuWrO9fPcAWpd2X8n+RZbWsWHzYJABtD5ndjxyzrtXfSgZ092I+gLp35Mm7lH1u5uUKOzuuP2aqBSsnxdoRhV+7LggiXMb90KfpCsYJLoTXxK98J90O17Skij+B2nBbnh18tCgj0TJ2p6fwLRklsu9XJo36IXJm99sTPuDFiUZ8XgmVSbaXwpZN+AqbGCEtmcSU9OTuSFD+xzT3vupZLrK47yUKdtPNqf31PTfcK1dO/yvfcS0QhsQQGmxE57sMJ+9vU2eip4o4fsYJ2c63s2BBFgE8ZPEA43158a72G8cSVbckkbjra8WxbeJzjpkwAuvsZQH2KHzWPLKxNTS31qXeAAmbr+csklAahexifaWbiBSYpaDaq+LdLipQH5dO4ZQTktjAp/XgbaVhWawl5OBTUybDiDw0CFPJBdTQtrdn044WfDOuFOIacU8urIcCmYH8RRSHYM3l9t34LSy+mmtkCfc2My5zV3q3++A=
   on:
     branch: master
-  tag: $NPM_TAG
+  tag: env(NPM_TAG)
