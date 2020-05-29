@@ -14,9 +14,9 @@ before_install:
 - node version-updater.js
 - mv new-package.json package.json
 - if [ -z "$TRAVIS_TAG" ]; then
-    export NPM_TAG=$TRAVIS_TAG
-  else
-    export NPM_TAG=next
+    export NPM_TAG=next;
+   else
+    export NPM_TAG=$TRAVIS_TAG;
   fi
 - echo "Publishing npm tag ${NPM_TAG}"
 
